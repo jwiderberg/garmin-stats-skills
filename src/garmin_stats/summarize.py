@@ -31,6 +31,17 @@ def _km(meters: Any) -> float | None:
     return round(m / 1000, 2) if m is not None else None
 
 
+def _local_iso(ms: Any) -> str | None:
+    """Garmin's *Local timestamps are epoch-ms already shifted to the wearer's
+    clock, so decode them as UTC to get local wall time: '2026-11-24T22:55:55'."""
+    from datetime import UTC, datetime
+
+    v = _num(ms)
+    if v is None:
+        return ms if isinstance(ms, str) and ms else None
+    return datetime.fromtimestamp(v / 1000, UTC).strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def daily(stats: Any) -> dict[str, Any]:
     """get_stats / get_user_summary → one day's activity + wellness totals."""
     s = _d(stats)
@@ -78,8 +89,8 @@ def sleep(raw: Any) -> dict[str, Any]:
         "rem_min": _min(dto.get("remSleepSeconds")),
         "awake_min": _min(dto.get("awakeSleepSeconds")),
         "nap_min": _min(dto.get("napTimeSeconds")),
-        "sleep_start_local": dto.get("sleepStartTimestampLocal"),
-        "sleep_end_local": dto.get("sleepEndTimestampLocal"),
+        "sleep_start_local": _local_iso(dto.get("sleepStartTimestampLocal")),
+        "sleep_end_local": _local_iso(dto.get("sleepEndTimestampLocal")),
         "avg_sleep_hr": _num(dto.get("avgHeartRate")),
         "avg_sleep_stress": _num(dto.get("avgSleepStress")),
         "avg_sleep_respiration": _num(dto.get("averageRespirationValue")),

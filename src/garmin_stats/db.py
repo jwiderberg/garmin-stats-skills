@@ -69,9 +69,21 @@ def connect(path: Path, readonly: bool = False) -> sqlite3.Connection:
         conn = sqlite3.connect(path, timeout=30)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(SCHEMA)
+        _migrate(conn)
         path.chmod(0o600)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """v0.3.2 and earlier stored sleep start/end as raw epoch-ms; make them
+    readable local times (idempotent)."""
+    for col in ("sleep_start_local", "sleep_end_local"):
+        conn.execute(
+            f"UPDATE daily SET {col} = strftime('%Y-%m-%dT%H:%M:%S', {col} / 1000, 'unixepoch') "
+            f"WHERE {col} GLOB '[0-9]*' AND length({col}) >= 12"
+        )
+    conn.commit()
 
 
 def upsert(conn: sqlite3.Connection, table: str, row: dict[str, Any]) -> None:

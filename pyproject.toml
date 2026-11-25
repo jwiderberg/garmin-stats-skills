@@ -1,6 +1,6 @@
 [project]
 name = "garmin-stats-skills"
-version = "0.3.2"
+version = "0.3.3"
 description = "Read your own Garmin Connect data from Claude (Cowork / Claude Code) via a local MCP server."
 readme = "README.md"
 license = "MIT"

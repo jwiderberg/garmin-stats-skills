@@ -157,3 +157,34 @@ def test_weigh_ins_and_bp():
         }
     )
     assert bp[0]["systolic"] == 118 and bp[0]["category"] == "NORMAL"
+
+
+def test_sleep_times_are_readable_local():
+    sl = s.sleep(
+        {
+            "dailySleepDTO": {
+                "sleepStartTimestampLocal": 1795560955000,
+                "sleepEndTimestampLocal": 1795587355000,
+            }
+        }
+    )
+    assert (sl["sleep_start_local"], sl["sleep_end_local"]) == (
+        "2026-11-24T22:55:55",
+        "2026-11-25T06:15:55",
+    )
+
+
+def test_old_epoch_rows_are_migrated(tmp_path):
+    from garmin_stats import db
+
+    p = tmp_path / "g.db"
+    conn = db.connect(p)
+    conn.execute(
+        "INSERT INTO daily(date, sleep_start_local) VALUES ('2026-11-25', '1795560955000')"
+    )
+    conn.commit()
+    conn.close()
+    conn = db.connect(p)  # reopening for writing runs the migration
+    assert (
+        conn.execute("SELECT sleep_start_local FROM daily").fetchone()[0] == "2026-11-24T22:55:55"
+    )

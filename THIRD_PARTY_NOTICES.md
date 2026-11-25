@@ -2,7 +2,7 @@
 
 Garmin Stats for Claude is MIT licensed (see LICENSE). It builds on the open-source
 projects below. Each keeps its own licence; their licence texts ship inside the
-installed packages. This list is generated from the runtime dependencies of v0.3.2.
+installed packages. This list is generated from the runtime dependencies of v0.3.3.
 
 ## Tools used by the installer (not bundled)
 
