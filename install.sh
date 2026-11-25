@@ -24,10 +24,15 @@ while [ $# -gt 0 ]; do
 done
 
 APP_HOME="${GARMIN_STATS_HOME:-$HOME/.garmin-stats-skills}"
-INTERACTIVE=0
-[ -t 1 ] && [ -r /dev/tty ] && INTERACTIVE=1   # a real Terminal window
+INTERACTIVE=0   # typing possible: a real Terminal window
+[ -t 0 ] && [ -t 1 ] && INTERACTIVE=1
+GUI=1           # Mac windows possible: logged-in desktop, not SSH or CI
+{ [ -n "${SSH_CONNECTION:-}" ] || [ -n "${CI:-}" ]; } && GUI=0
 
-B=$'\033[1m'; D=$'\033[2m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; N=$'\033[0m'
+B=""; D=""; G=""; Y=""; R=""; N=""
+if [ -t 1 ]; then
+    B=$'\033[1m'; D=$'\033[2m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; N=$'\033[0m'
+fi
 step() { printf '\n%s%s%s\n' "$B" "$*" "$N"; }
 say()  { printf '   %s\n' "$*"; }
 note() { printf '   %s%s%s\n' "$D" "$*" "$N"; }
@@ -110,14 +115,12 @@ if [ "$DO_SETUP" = 1 ]; then
     say "A window will ask for your Garmin email and password. If Garmin emails"
     say "you a code, a second window asks for that. The password goes only to Garmin."
     echo
-    if [ "$INTERACTIVE" = 1 ]; then
-        GARMIN_STATS_HOME="$APP_HOME" "$EXE" setup </dev/tty && SETUP_OK=1 || SETUP_OK=0
+    if [ "$GUI" = 1 ]; then          # sign-in + choice in Mac windows; no typing here
+        GARMIN_STATS_HOME="$APP_HOME" "$EXE" setup </dev/null || true
+    elif [ "$INTERACTIVE" = 1 ]; then  # e.g. over SSH: ask in this terminal
+        GARMIN_STATS_HOME="$APP_HOME" "$EXE" setup --terminal || true
     else
-        GARMIN_STATS_HOME="$APP_HOME" "$EXE" setup --terminal --days 30 && SETUP_OK=1 || SETUP_OK=0
-    fi
-    if [ "$SETUP_OK" = 0 ]; then
-        warn "Not finished, and that's fine: whatever was imported is kept."
-        say  "To try the sign-in again later, just ask Claude: \"connect my Garmin\"."
+        warn "No screen or keyboard here, so the sign-in is skipped."
     fi
 else
     ok "skipped (--no-setup)"
@@ -141,34 +144,61 @@ fi
 ZIP="$(GARMIN_STATS_HOME="$APP_HOME" "$EXE" plugin-zip)" || fail "Couldn't build the plugin file."
 ok "plugin file created: $ZIP"
 
-cat <<EOF
+SIGNED_IN=0; SYNCING=0
+GARMIN_STATS_HOME="$APP_HOME" "$EXE" status >/dev/null 2>&1 && SIGNED_IN=1
+[ -f "$HOME/Library/LaunchAgents/com.garmin-stats-skills.sync.plist" ] && SYNCING=1
 
-${B}Done. One last step, in the Claude app:${N}
+echo
+if [ "$SIGNED_IN" = 1 ]; then
+    printf '%sDone. One last step, in the Claude app:%s\n' "$B" "$N"
+else
+    printf '%sInstalled, but not connected to Garmin yet.%s\n' "$Y" "$N"
+    say "Nothing was imported. Sign in later in either of these ways:"
+    say "  • in Claude, once the plugin is added: ask \"connect my Garmin\""
+    say "  • or run this installer again"
+    echo
+    printf '%sTo add it to the Claude app:%s\n' "$B" "$N"
+fi
+cat <<EOF
 
    1. Click ${B}Customize${N} (left sidebar), then ${B}Plugins${N}
    2. Click ${B}Upload plugin${N} and choose ${B}Garmin-Stats.zip${N}
-      (a Finder window is showing it; you can drag it in)
+      (it's in $APP_HOME; a Finder window shows it)
 
    Then ask Claude: ${B}"How did I sleep last night?"${N}
 
-What runs from now on:
-   • Every hour your Mac fetches new Garmin data in the background.
-   • If Garmin ever signs you out, you'll get a notification. Ask Claude
-     "reconnect my Garmin" to sign in again.
-   • To update: run this installer again. To remove everything:
-     curl -fsSL https://raw.githubusercontent.com/$REPO/main/uninstall.sh | bash
 EOF
+if [ "$SYNCING" = 1 ]; then
+    say "• Every hour your Mac fetches new Garmin data in the background."
+    say "• If Garmin signs you out, you'll get a notification; ask Claude to reconnect."
+else
+    say "• The hourly background sync switches on after you sign in."
+fi
+say "• To update: run this installer again. To remove everything:"
+say "  curl -fsSL https://raw.githubusercontent.com/$REPO/main/uninstall.sh | bash"
 
-[ "$INTERACTIVE" = 1 ] || exit 0
+[ "$GUI" = 1 ] || exit 0
 open -R "$ZIP" 2>/dev/null || true
-CHOICE="$(osascript -e 'button returned of (display dialog "Garmin Stats is installed.
+if [ "$SIGNED_IN" = 1 ]; then
+    MSG="Garmin Stats is installed and your data is importing.
 
 One last step, in the Claude app:
   1. Customize → Plugins
-  2. Upload plugin → choose \"Garmin-Stats.zip\"
+  2. Upload plugin → choose Garmin-Stats.zip
      (the Finder window behind this one is showing it)
 
-Then ask Claude: \"How did I sleep last night?\"" with title "Garmin Stats" buttons {"Done", "Open Claude"} default button "Open Claude" with icon note)' 2>/dev/null || true)"
+Then ask Claude: How did I sleep last night?"
+else
+    MSG="Garmin Stats is installed, but not connected to Garmin yet.
+
+Add it to the Claude app (Customize → Plugins → Upload plugin → Garmin-Stats.zip), then ask Claude: connect my Garmin"
+fi
+CHOICE="$(osascript - "$MSG" <<'OSA' 2>/dev/null || true
+on run argv
+    button returned of (display dialog (item 1 of argv) with title "Garmin Stats" buttons {"Done", "Open Claude"} default button "Open Claude" with icon note giving up after 600)
+end run
+OSA
+)"
 if [ "$CHOICE" = "Open Claude" ]; then
     open -a Claude 2>/dev/null || open "https://claude.ai/download"
 fi
