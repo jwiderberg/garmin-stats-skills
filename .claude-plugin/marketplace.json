@@ -1,0 +1,13 @@
+{
+  "name": "garmin-stats-skills",
+  "description": "Garmin Connect data for Claude Cowork and Claude Code.",
+  "owner": { "name": "Jakob Widerberg", "url": "https://github.com/jwiderberg" },
+  "plugins": [
+    {
+      "name": "garmin-stats-skills",
+      "source": "./",
+      "description": "Read-only access to your own Garmin Connect data through a local MCP server, plus a skill for using it well.",
+      "category": "health"
+    }
+  ]
+}

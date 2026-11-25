@@ -1,0 +1,21 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --extra dev --python 3.12
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run pytest -q
+      - name: installer smoke test (no login, no Claude Code)
+        run: |
+          bash -n install.sh uninstall.sh
+          GARMIN_STATS_HOME="$RUNNER_TEMP/gs" ./install.sh --no-login --no-claude-code
+          test -x "$RUNNER_TEMP/gs/run-mcp.sh"
+          "$(uv tool dir --bin)/garmin-stats" status || test $? -eq 1

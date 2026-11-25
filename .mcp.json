@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "garmin": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "L=\"$HOME/.garmin-stats-skills/run-mcp.sh\"; if [ -x \"$L\" ]; then exec \"$L\"; fi; echo \"garmin-stats-skills is not set up on this computer yet. In Terminal run: curl -fsSL https://raw.githubusercontent.com/jwiderberg/garmin-stats-skills/main/install.sh | bash\" >&2; exit 1"
+      ]
+    }
+  }
+}

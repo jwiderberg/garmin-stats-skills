@@ -1,0 +1,11 @@
+{
+  "name": "garmin-stats-skills",
+  "displayName": "Garmin Stats",
+  "version": "0.1.0",
+  "description": "Ask Claude about your own Garmin Connect data: sleep, HRV, heart rate, stress, Body Battery, steps, workouts, training status and load, VO2max, weight and blood pressure. Read-only, runs on your computer.",
+  "author": { "name": "Jakob Widerberg", "url": "https://github.com/jwiderberg" },
+  "homepage": "https://github.com/jwiderberg/garmin-stats-skills",
+  "repository": "https://github.com/jwiderberg/garmin-stats-skills",
+  "license": "MIT",
+  "keywords": ["garmin", "health", "fitness", "sleep", "hrv", "training", "mcp"]
+}
