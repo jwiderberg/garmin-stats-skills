@@ -1,108 +1,102 @@
 # Garmin Stats for Claude
 
-Ask Claude about your own Garmin data, like *"How did I sleep last night?"*,
-*"Am I recovered enough to train hard today?"*, or *"How has my running
-changed since summer?"*. Claude answers from your sleep, HRV, heart rate,
-stress, Body Battery, steps, workouts, training load, VO2max, weight and
-blood pressure.
+Ask Claude about your own Garmin data: sleep, HRV, resting heart rate, stress,
+Body Battery, steps, workouts, training load, VO2max, weight and blood pressure.
 
-It works in the **Claude desktop app (Cowork)** and **Claude Code** on a Mac.
+I wanted to ask *"am I recovered enough for a hard session?"* and get an answer
+grounded in my own numbers, not a generic one. Garmin has no personal API, so
+this does it the practical way: it copies your data to your Mac every hour and
+lets Claude query that copy.
 
-## Install (about 2 minutes, no technical skills needed)
+Works in the Claude desktop app (Cowork) and Claude Code. macOS only.
 
-**1. Open Terminal.** Press **⌘ Space**, type **Terminal**, and press **Return**.
+## Install
 
-**2. Paste this line and press Return:**
+1. Open **Terminal** (⌘ Space, type *Terminal*, Return).
+2. Paste this and press Return:
 
-```
-curl -fsSL https://raw.githubusercontent.com/jwiderberg/garmin-stats-skills/main/install.sh | bash
-```
+   ```
+   curl -fsSL https://raw.githubusercontent.com/jwiderberg/garmin-stats-skills/main/install.sh | bash
+   ```
 
-**3. Sign in to Garmin.** A normal Mac window asks for your Garmin email and
-password, and for a code if Garmin emails you one.
+3. Sign in to Garmin in the window that pops up. If Garmin emails you a code,
+   enter that too.
+4. A Finder window opens with **Garmin-Stats.zip**. In Claude, go to
+   **Customize → Plugins → Upload plugin** and choose it.
 
-**4. Add it to Claude.** When the installer finishes, a Finder window shows
-**Garmin-Stats.zip**. In the Claude app:
+Then ask Claude *"How did I sleep last night?"*
 
-1. Click **Customize**, then **Plugins**
-2. Click **Upload plugin** and choose **Garmin-Stats.zip** (or drag it in)
+The whole thing takes about two minutes. You don't need Python or developer
+tools; the installer sets up everything it needs.
 
-Then ask: *"How did I sleep last night?"*
+## What you can ask
+
+- *How did I sleep this week compared with last?*
+- *Is my HRV trending down?*
+- *Summarise my running since September.*
+- *What does Garmin say my training status is, and is my load ramping too fast?*
+- *Plot my weight and resting heart rate since January.*
 
 ## How it works
 
-- A small helper on your Mac downloads your Garmin data **every hour** into a
-  private file on your Mac. Older history, up to a year, fills in gradually
-  over the first day.
-- Claude reads that file, so answers are instant.
-- Your password goes only to Garmin, once. After that, only Garmin's sign-in
-  token is kept, readable only by you. Nothing is ever changed in your Garmin
-  account.
-- If Garmin ever signs you out, your Mac shows a notification. Just tell
-  Claude **"reconnect my Garmin"** and the sign-in window appears again.
+- **Sync.** A background job on your Mac pulls from Garmin Connect every hour.
+  On the first run it takes the last two weeks, then backfills the rest of the
+  year a bit at a time, so Garmin doesn't throttle it.
+- **Cache.** Everything lands in one SQLite file in `~/.garmin-stats-skills/`.
+  Claude reads that file, so answers are instant and don't touch Garmin.
+- **Skill.** The plugin gives Claude five read-only tools (status, SQL query,
+  raw payload, sync now, sign in) and a skill that explains the data, including
+  the parts that are easy to get wrong: a missing day is a gap, not a zero, and
+  last night's sleep is filed under today.
 
-> Garmin has no official personal API. This uses the same sign-in the Garmin
-> Connect app uses, via
-> [python-garminconnect](https://github.com/cyberjunky/python-garminconnect),
-> so Garmin could change it at any time. Use it for your own account only.
+## Your data
+
+- Your password goes to Garmin once and is never stored. Only Garmin's sign-in
+  token is kept on your Mac, readable by you alone.
+- Nothing is sent anywhere else, and nothing is ever written back to Garmin.
+- If Garmin signs you out, you get a notification. Tell Claude *"reconnect my
+  Garmin"* and the sign-in window comes back.
+
+This uses the same unofficial sign-in as the Garmin Connect app, via
+[python-garminconnect](https://github.com/cyberjunky/python-garminconnect).
+Garmin can change that whenever it likes. Use it for your own account.
 
 ## Settings
 
-The settings file is `~/.garmin-stats-skills/config.toml`. In Finder, press
-**⌘⇧G** and paste that path. You can change:
+`~/.garmin-stats-skills/config.toml` (in Finder: ⌘⇧G, paste the path):
 
 | Setting | Default | |
 |---|---|---|
-| `db_path` | `~/.garmin-stats-skills/garmin.db` | where the local copy lives |
 | `history_days` | `365` | how much history to keep |
-| `sync_interval_minutes` | `60` | how often to sync |
-| `store_raw` | `true` | keep Garmin's full detail (minute-level sleep, HR samples, splits) |
-| `refresh_days`, `backfill_per_run` | `3`, `14` | how much each sync fetches |
+| `sync_interval_minutes` | `60` | how often to sync (then run `garmin-stats schedule`) |
+| `store_raw` | `true` | keep Garmin's full detail: minute-level sleep, HR samples, splits |
+| `db_path` | `~/.garmin-stats-skills/garmin.db` | where the cache lives |
 
-After changing `sync_interval_minutes`, run `garmin-stats schedule` once.
+## Update, uninstall
 
-**Prefer automatic plugin updates?** Instead of uploading the zip, use
-**Add marketplace** and enter `jwiderberg/garmin-stats-skills`. The zip is
-also attached to every [release](https://github.com/jwiderberg/garmin-stats-skills/releases).
+To **update**, run the install line again and upload the new zip. If you'd
+rather have updates arrive on their own, add `jwiderberg/garmin-stats-skills`
+under **Customize → Plugins → Add marketplace** instead of uploading the zip.
 
-## Update or uninstall
-
-To **update**, run the install line again, then upload the new
-**Garmin-Stats.zip** (marketplace installs update on their own).
-
-To **uninstall**:
+To **uninstall**, run this, then remove the plugin in Claude:
 
 ```
 curl -fsSL https://raw.githubusercontent.com/jwiderberg/garmin-stats-skills/main/uninstall.sh | bash
 ```
 
-Then remove **Garmin Stats** in Claude under **Customize → Plugins**.
+## Under the hood
 
-## For developers
-
-The plugin is a local stdio MCP server, `garmin-stats mcp`, with five tools:
-
-| Tool | Does |
-|---|---|
-| `garmin_status` | Sign-in state, last sync, coverage, schema |
-| `garmin_query(sql)` | Read-only SQL over the local SQLite cache |
-| `garmin_raw(day, kind)` | Garmin's full payload for one day |
-| `garmin_sync_now(days)` | Sync immediately |
-| `garmin_connect()` | Sign in again through native macOS dialogs |
-
-The plugin also ships a skill (`skills/garmin-stats`) that teaches Claude the
-schema and how to read the data. A launchd agent
-(`com.garmin-stats-skills.sync`) runs `garmin-stats sync` on a schedule.
+A local stdio MCP server (`garmin-stats mcp`), a launchd agent running
+`garmin-stats sync`, and a skill in `skills/garmin-stats`. The command line is
+there if you want it:
 
 ```
-garmin-stats setup | login [--terminal] | sync [--days N] | status | schedule [--off]
-             plugin-zip [--reveal] | logout
+garmin-stats status | sync [--days N] | login | schedule [--off] | plugin-zip | logout
 ```
 
 ```bash
-uv sync --extra dev && uv run pytest
-./install.sh --no-setup        # install this checkout
-claude plugin validate .
+uv sync --extra dev && uv run pytest    # tests
+./install.sh --no-setup                 # install this checkout
 ```
 
-MIT licensed. Not affiliated with Garmin.
+Releases attach `Garmin-Stats.zip`. MIT licence. Not affiliated with Garmin.
