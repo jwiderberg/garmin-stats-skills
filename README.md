@@ -21,13 +21,17 @@ Works in the Claude desktop app (Cowork) and Claude Code. macOS only.
 
 3. Sign in to Garmin in the window that pops up. If Garmin emails you a code,
    enter that too.
-4. A Finder window opens with **Garmin-Stats.zip**. In Claude, go to
+4. Pick how much history to import: 30, 60 or 90 days. You'll see each day
+   arrive as it's saved.
+5. A Finder window opens with **Garmin-Stats.zip**. In Claude, go to
    **Customize → Plugins → Upload plugin** and choose it.
 
 Then ask Claude *"How did I sleep last night?"*
 
-The whole thing takes about two minutes. You don't need Python or developer
-tools; the installer sets up everything it needs.
+The import is deliberately slow, about 8 seconds per day (so 4 to 12 minutes),
+because hammering Garmin gets you blocked. You can close Terminal at any point;
+whatever's left carries on in the background. You don't need Python or
+developer tools: the installer explains each step and sets up everything itself.
 
 ## What you can ask
 
@@ -39,9 +43,10 @@ tools; the installer sets up everything it needs.
 
 ## How it works
 
-- **Sync.** A background job on your Mac pulls from Garmin Connect every hour.
-  On the first run it takes the last two weeks, then backfills the rest of the
-  year a bit at a time, so Garmin doesn't throttle it.
+- **Sync.** A background job on your Mac pulls the latest from Garmin Connect
+  every hour. Requests are spaced at least a second apart, with some random
+  jitter. If Garmin still says slow down, it backs off and tries again later
+  rather than pushing.
 - **Cache.** Everything lands in one SQLite file in `~/.garmin-stats-skills/`.
   Claude reads that file, so answers are instant and don't touch Garmin.
 - **Skill.** The plugin gives Claude five read-only tools (status, SQL query,
@@ -67,7 +72,8 @@ Garmin can change that whenever it likes. Use it for your own account.
 
 | Setting | Default | |
 |---|---|---|
-| `history_days` | `365` | how much history to keep |
+| `history_days` | your choice at install (30/60/90) | how much history to keep; raise it and older days backfill gradually |
+| `request_delay_seconds` | `1.0` | minimum gap between Garmin requests (don't go lower) |
 | `sync_interval_minutes` | `60` | how often to sync (then run `garmin-stats schedule`) |
 | `store_raw` | `true` | keep Garmin's full detail: minute-level sleep, HR samples, splits |
 | `db_path` | `~/.garmin-stats-skills/garmin.db` | where the cache lives |
@@ -99,4 +105,23 @@ uv sync --extra dev && uv run pytest    # tests
 ./install.sh --no-setup                 # install this checkout
 ```
 
-Releases attach `Garmin-Stats.zip`. MIT licence. Not affiliated with Garmin.
+Releases attach `Garmin-Stats.zip`.
+
+## Licence and credits
+
+MIT. See [LICENSE](LICENSE). Not affiliated with or endorsed by Garmin.
+
+Built on other people's good work:
+
+- [python-garminconnect](https://github.com/cyberjunky/python-garminconnect)
+  by Ron Klinkien and contributors (MIT): all the hard work of talking to
+  Garmin Connect
+- [curl_cffi](https://github.com/lexiforest/curl_cffi) (MIT), which
+  garminconnect uses to sign in
+- [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) (MIT):
+  the server Claude talks to
+- [uv](https://github.com/astral-sh/uv) by Astral (MIT/Apache-2.0): installs
+  the helper and its Python
+
+The full dependency list, with licences, is in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

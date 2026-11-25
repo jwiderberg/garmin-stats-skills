@@ -27,6 +27,10 @@ refresh_days = 3
 # Background sync interval on macOS (launchd).
 sync_interval_minutes = 60
 
+# Minimum gap between requests to Garmin (random extra 0-50% is added).
+# Keeps imports slow enough that Garmin doesn't block you. Don't go below 1.
+request_delay_seconds = 1.0
+
 # Keep Garmin's full raw payloads (sleep epochs, HR samples, splits, ...).
 # ~50 KB per day. Turn off to keep only the summary tables.
 store_raw = true
@@ -41,6 +45,7 @@ class Config:
     refresh_days: int = 3
     sync_interval_minutes: int = 60
     store_raw: bool = True
+    request_delay_seconds: float = 1.0
 
 
 def config_file() -> Path:
@@ -63,4 +68,27 @@ def load() -> Config:
         refresh_days=max(1, int(raw.get("refresh_days", 3))),
         sync_interval_minutes=max(5, int(raw.get("sync_interval_minutes", 60))),
         store_raw=bool(raw.get("store_raw", True)),
+        request_delay_seconds=max(0.5, float(raw.get("request_delay_seconds", 1.0))),
     )
+
+
+def set_value(key: str, value: int | float | bool | str) -> None:
+    """Rewrite one `key = value` line in config.toml, keeping comments."""
+    import re
+
+    load()  # make sure the file exists
+    f = config_file()
+    lit = (
+        ("true" if value else "false")
+        if isinstance(value, bool)
+        else f'"{value}"'
+        if isinstance(value, str)
+        else str(value)
+    )
+    text = f.read_text()
+    pattern = re.compile(rf"^{re.escape(key)}\s*=.*$", re.M)
+    if pattern.search(text):
+        text = pattern.sub(f"{key} = {lit}", text)
+    else:
+        text += f"\n{key} = {lit}\n"
+    f.write_text(text)

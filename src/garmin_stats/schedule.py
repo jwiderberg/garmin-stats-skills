@@ -31,7 +31,7 @@ def install(interval_minutes: int) -> Path:
         "ProgramArguments": [_exe(), "sync", "--quiet"],
         "EnvironmentVariables": {"GARMIN_STATS_HOME": str(paths.home())},
         "StartInterval": interval_minutes * 60,
-        "RunAtLoad": True,
+        "RunAtLoad": False,  # setup runs the first import itself, in the foreground
         "ProcessType": "Background",
         "LowPriorityIO": True,
         "StandardOutPath": log,

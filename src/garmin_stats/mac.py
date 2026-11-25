@@ -53,3 +53,21 @@ def alert(message: str) -> None:
         ],
         capture_output=True,
     )
+
+
+def choose(prompt: str, buttons: list[str], default: str) -> str:
+    """Dialog with up to three buttons; returns the one clicked."""
+    btns = ", ".join(_q(b) for b in buttons)
+    script = (
+        f'display dialog {_q(prompt)} with title "Garmin Stats" '
+        f"buttons {{{btns}}} default button {_q(default)} with icon note"
+    )
+    r = subprocess.run(
+        ["osascript", "-e", f"button returned of ({script})"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if r.returncode != 0:
+        raise Cancelled("Cancelled.")
+    return r.stdout.strip()

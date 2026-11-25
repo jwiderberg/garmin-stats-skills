@@ -6,21 +6,57 @@ Each run (hourly via launchd):
      until `history_days` of history exist,
   3. pulls activities, weigh-ins and blood pressure for those spans,
   4. prunes anything older than `history_days`.
-A rate-limit or network failure stops the run early; whatever was fetched
-is kept, and the next run picks up where this one stopped.
+Every Garmin request is spaced `request_delay_seconds` apart (plus random
+jitter), so even a 90-day import looks like a person browsing, not a
+scraper. If Garmin still pushes back, a patient run (the first import)
+waits 1, 3, then 5 minutes; an hourly run just stops and the next one picks
+up where it left off. Only one sync runs at a time (file lock).
 """
 
 from __future__ import annotations
 
+import fcntl
+import random
 import time
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from garmin_stats import client, db, summarize
+from garmin_stats import client, db, paths, summarize
 from garmin_stats.config import Config
 
-PAUSE_S = 0.4  # between days: gentle on Garmin
+SLEEP: Callable[[float], None] = time.sleep  # swapped out in tests
+BACKOFF_S = (60, 180, 300)  # patient runs: waits after Garmin says "slow down"
+Progress = Callable[..., None]
+
+
+class Throttled:
+    """Wraps a garminconnect client so consecutive requests are at least
+    `delay` seconds apart (+0–50% jitter), and Garmin's 429 becomes
+    client.RateLimited."""
+
+    def __init__(self, garmin: Any, delay: float) -> None:
+        self._g = garmin
+        self._delay = delay
+        self._next = 0.0
+
+    def __getattr__(self, name: str) -> Any:
+        fn = getattr(self._g, name)
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            wait = self._next - time.monotonic()
+            if wait > 0:
+                SLEEP(wait)
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                if "TooManyRequests" in type(e).__name__:
+                    raise client.RateLimited("Garmin asked us to slow down.") from e
+                raise
+            finally:
+                self._next = time.monotonic() + self._delay * (1 + random.random() * 0.5)
+
+        return call
 
 
 def _now() -> str:
@@ -141,37 +177,70 @@ def spans(g: Any, conn, start: date, end: date, store_raw: bool) -> int:
     return len(acts)
 
 
+def _fetch_day(g: Any, d: date, conn, cfg: Config, patient: bool, progress: Progress) -> dict:
+    for attempt in range(len(BACKOFF_S) + 1):
+        try:
+            return day_row(g, d, conn, cfg.store_raw)
+        except client.RateLimited:
+            if not patient or attempt == len(BACKOFF_S):
+                raise
+            progress("pause", seconds=BACKOFF_S[attempt])
+            SLEEP(BACKOFF_S[attempt])
+    raise AssertionError("unreachable")
+
+
 def run(
-    cfg: Config, garmin: Any | None = None, today: date | None = None, days: int | None = None
+    cfg: Config,
+    garmin: Any | None = None,
+    today: date | None = None,
+    days: int | None = None,
+    patient: bool = False,
+    progress: Progress | None = None,
 ) -> dict[str, Any]:
-    """One sync pass. `days` forces a full refresh of the last N days."""
+    """One sync pass. `days` imports/refreshes exactly the last N days
+    (newest first); otherwise refresh + gradual backfill. `progress` gets
+    ("day", i=, n=, date=, row=), ("pause", seconds=) and ("extras",)."""
+    progress = progress or (lambda *a, **k: None)
     today = today or date.today()
+    report: dict[str, Any] = {"refreshed": 0, "backfilled": 0, "activities": 0, "ok": True}
+
+    paths.home().mkdir(parents=True, exist_ok=True)
+    lock = (paths.home() / "sync.lock").open("w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock.close()
+        return report | {"skipped": "another sync is already running"}
+
     started = _now()
     conn = db.connect(cfg.db_path)
-    report: dict[str, Any] = {"refreshed": 0, "backfilled": 0, "activities": 0, "ok": True}
     try:
         if days:
             refresh, backfill = [today - timedelta(days=i) for i in range(days)], []
         else:
             refresh, backfill = plan(conn, cfg, today)
-        g = garmin or client.session_client()
-        for i, d in enumerate(refresh + backfill):
-            db.upsert(conn, "daily", day_row(g, d, conn, cfg.store_raw))
+        g = Throttled(garmin or client.session_client(), cfg.request_delay_seconds)
+        todo = refresh + backfill
+        for i, d in enumerate(todo, 1):
+            row = _fetch_day(g, d, conn, cfg, patient, progress)
+            db.upsert(conn, "daily", row)
             conn.commit()
             report["refreshed" if d in refresh else "backfilled"] += 1
-            if i:
-                time.sleep(PAUSE_S if garmin is None else 0)
-        report["activities"] += spans(
-            g, conn, min(min(refresh), today - timedelta(days=30)), today, cfg.store_raw
-        )
+            progress("day", i=i, n=len(todo), date=d.isoformat(), row=row)
+        progress("extras")
+        recent_start = min(min(refresh), today - timedelta(days=30))
+        report["activities"] += spans(g, conn, recent_start, today, cfg.store_raw)
         if backfill:
             report["activities"] += spans(g, conn, min(backfill), max(backfill), cfg.store_raw)
+        conn.commit()
         cutoff = (today - timedelta(days=cfg.history_days - 1)).isoformat()
         for table in ("daily", "activities", "weigh_ins", "raw"):
             conn.execute(f"DELETE FROM {table} WHERE date < ?", (cutoff,))
         conn.execute("DELETE FROM blood_pressure WHERE substr(measured_local,1,10) < ?", (cutoff,))
     except (client.NotLoggedIn, client.RateLimited) as e:
         report |= {"ok": False, "message": str(e)}
+    except KeyboardInterrupt:
+        report |= {"ok": False, "message": "stopped", "interrupted": True}
     finally:
         conn.execute(
             "INSERT INTO sync_log VALUES (?, ?, ?, ?, ?)",
@@ -189,4 +258,6 @@ def run(
         )
         conn.commit()
         conn.close()
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
     return report

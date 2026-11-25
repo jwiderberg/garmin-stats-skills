@@ -15,5 +15,5 @@ def isolated_home(tmp_path, monkeypatch):
 
     monkeypatch.setattr(schedule, "install", lambda mins: None)
     monkeypatch.setattr(schedule, "is_installed", lambda: False)
-    monkeypatch.setattr(sync, "PAUSE_S", 0)
+    monkeypatch.setattr(sync, "SLEEP", lambda s: None)
     return tmp_path / "gs-home"

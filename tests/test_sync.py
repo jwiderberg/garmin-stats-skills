@@ -84,3 +84,69 @@ def test_forced_days():
     c = cfg()
     r = sync.run(c, garmin=FakeGarmin(), today=TODAY, days=4)
     assert (r["refreshed"], r["backfilled"]) == (4, 0)
+
+
+def test_requests_are_spaced_out(monkeypatch):
+    import time as _t
+
+    waits = []
+    monkeypatch.setattr(sync, "SLEEP", waits.append)
+    clock = iter(range(0, 10_000))
+    monkeypatch.setattr(_t, "monotonic", lambda: next(clock) * 0.0)  # frozen clock
+    c = cfg(request_delay_seconds=1.0)
+    sync.run(c, garmin=FakeGarmin(), today=TODAY, days=1)
+    # 5 day endpoints + 3 span endpoints = 8 calls → 7 waits, each 1.0–1.5 s
+    assert len(waits) == 7 and all(1.0 <= w <= 1.5 for w in waits)
+
+
+def test_patient_run_backs_off_then_continues(monkeypatch):
+    waits = []
+    monkeypatch.setattr(sync, "SLEEP", waits.append)
+
+    class Flaky(FakeGarmin):
+        hits = 0
+
+        def get_hrv_data(self, d):
+            Flaky.hits += 1
+            if Flaky.hits == 1:
+                from garmin_stats.client import RateLimited
+
+                raise RateLimited("slow down")
+            return super().get_hrv_data(d)
+
+    events = []
+    c = cfg(request_delay_seconds=0.5)
+    r = sync.run(
+        c,
+        garmin=Flaky(),
+        today=TODAY,
+        days=2,
+        patient=True,
+        progress=lambda e, **k: events.append((e, k.get("seconds"))),
+    )
+    assert r["ok"] and r["refreshed"] == 2
+    assert ("pause", 60) in events and 60 in waits
+
+
+def test_only_one_sync_at_a_time():
+    import fcntl
+
+    from garmin_stats import paths
+
+    paths.home().mkdir(parents=True, exist_ok=True)
+    with (paths.home() / "sync.lock").open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        r = sync.run(cfg(), garmin=FakeGarmin(), today=TODAY, days=1)
+    assert r.get("skipped")
+
+
+def test_progress_reports_each_day():
+    seen = []
+    sync.run(
+        cfg(),
+        garmin=FakeGarmin(),
+        today=TODAY,
+        days=3,
+        progress=lambda e, **k: seen.append((e, k.get("i"), k.get("n"))),
+    )
+    assert [s for s in seen if s[0] == "day"] == [("day", 1, 3), ("day", 2, 3), ("day", 3, 3)]
