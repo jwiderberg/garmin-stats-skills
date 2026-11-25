@@ -96,9 +96,9 @@ Garmin can change that whenever it likes. Use it for your own account.
 ## Update, uninstall
 
 To **update**, run the install line again and upload the new zip. If you'd
-rather have updates arrive on their own, add `jwiderberg/garmin-stats-skills`
-under **Settings → Plugins → Browse plugins → Add → Add marketplace** instead
-of uploading the zip.
+rather have updates arrive on their own, add the plugin as a marketplace
+instead: **Settings → Plugins → Browse plugins → Add → Add marketplace**, and
+paste `https://github.com/jwiderberg/garmin-stats-skills`.
 
 To **uninstall**, run this, then remove the plugin in Claude:
 
