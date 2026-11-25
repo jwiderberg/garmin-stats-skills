@@ -35,10 +35,11 @@ class Throttled:
     `delay` seconds apart (+0–50% jitter), and Garmin's 429 becomes
     client.RateLimited."""
 
-    def __init__(self, garmin: Any, delay: float) -> None:
+    def __init__(self, garmin: Any, delay: float, progress: Progress | None = None) -> None:
         self._g = garmin
         self._delay = delay
         self._next = 0.0
+        self._progress = progress or (lambda *a, **k: None)
 
     def __getattr__(self, name: str) -> Any:
         fn = getattr(self._g, name)
@@ -46,7 +47,9 @@ class Throttled:
         def call(*args: Any, **kwargs: Any) -> Any:
             wait = self._next - time.monotonic()
             if wait > 0:
+                self._progress("wait", seconds=wait)
                 SLEEP(wait)
+            self._progress("request", method=name)
             try:
                 return fn(*args, **kwargs)
             except Exception as e:
@@ -282,6 +285,7 @@ def run(
 ) -> dict[str, Any]:
     """One sync pass. `days` imports/refreshes exactly the last N days
     (newest first); otherwise refresh + gradual backfill. `progress` gets
+    ("plan", days=, per_day=), ("request", method=), ("wait", seconds=),
     ("day", i=, n=, date=, row=), ("pause", seconds=) and ("extras",)."""
     progress = progress or (lambda *a, **k: None)
     today = today or date.today()
@@ -302,9 +306,11 @@ def run(
             refresh, backfill = [today - timedelta(days=i) for i in range(days)], []
         else:
             refresh, backfill = plan(conn, cfg, today)
-        g = Throttled(garmin or client.session_client(), cfg.request_delay_seconds)
+        g = Throttled(garmin or client.session_client(), cfg.request_delay_seconds, progress)
+        progress("plan", days=len(refresh) + len(backfill), per_day=calls_per_day(cfg))
         todo = refresh + backfill
         for i, d in enumerate(todo, 1):
+            progress("day_start", i=i, n=len(todo), date=d.isoformat())
             row = _fetch_day(g, d, conn, cfg, patient, progress)
             db.upsert(conn, "daily", row)
             conn.commit()

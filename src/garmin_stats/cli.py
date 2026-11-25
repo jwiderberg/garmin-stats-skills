@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import getpass
 import sys
-import time
 from datetime import date
 
 from garmin_stats import __version__, client, config, mac, paths, schedule, sync
@@ -84,41 +83,22 @@ def _ask_days(terminal: bool) -> int:
     return int(raw) if raw in {str(n) for n in IMPORT_CHOICES} else 30
 
 
-def _fmt_day(row: dict) -> str:
-    bits = []
-    if row.get("sleep_score") is not None:
-        bits.append(f"sleep {row['sleep_score']}")
-    if row.get("hrv_last_night_ms") is not None:
-        bits.append(f"HRV {round(row['hrv_last_night_ms'])}")
-    if row.get("resting_hr") is not None:
-        bits.append(f"RHR {row['resting_hr']}")
-    if row.get("steps") is not None:
-        bits.append(f"{row['steps']:,} steps")
-    return " · ".join(bits) if bits else "no data (watch not worn?)"
+def _existing_days(cfg: config.Config) -> tuple[int, str | None, str | None]:
+    if not cfg.db_path.exists():
+        return 0, None, None
+    from garmin_stats import db
 
-
-def _printer():
-    t0 = time.monotonic()
-
-    def progress(event: str, **k) -> None:
-        if event == "day":
-            i, n = k["i"], k["n"]
-            left = (time.monotonic() - t0) / i * (n - i)
-            eta = f"~{int(left // 60)}m{int(left % 60):02d}s left" if i < n else "done"
-            print(f"   [{i:>3}/{n}] {k['date']}  {_fmt_day(k['row'])}   ({eta})", flush=True)
-        elif event == "pause":
-            print(
-                f"   … Garmin asked us to slow down. Waiting {k['seconds'] // 60} min, "
-                "then carrying on.",
-                flush=True,
-            )
-        elif event == "extras":
-            print("   Fetching workouts, weigh-ins and blood pressure…", flush=True)
-
-    return progress
+    conn = db.connect(cfg.db_path)
+    try:
+        n, lo, hi = conn.execute("SELECT count(*), min(date), max(date) FROM daily").fetchone()
+    finally:
+        conn.close()
+    return n, lo, hi
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
+    from garmin_stats.live import Live
+
     cfg = config.load()
 
     # 1. Garmin sign-in
@@ -128,6 +108,15 @@ def cmd_setup(args: argparse.Namespace) -> int:
             return 1
     else:
         print("✓ Already signed in to Garmin.")
+
+    # Already imported before? Then this is an update: don't import again.
+    n, lo, hi = _existing_days(cfg)
+    if n and not args.reimport:
+        print(f"✓ You already have {n} days saved ({lo} → {hi}). Skipping the first import;")
+        print("  the hourly sync keeps it fresh. (garmin-stats setup --reimport to redo it.)")
+        if mac.is_mac():
+            schedule.install(cfg.sync_interval_minutes)
+        return 0
 
     # 2. How much history
     try:
@@ -140,13 +129,18 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     # 3. Background sync first, so closing Terminal mid-import is safe
     if mac.is_mac():
+        print("→ Switching on the hourly background sync.")
+        print("  macOS will show a notice: “garmin-stats can run in the background”.")
+        print("  That's this sync, and it's expected. You can switch it off any time in")
+        print("  System Settings → General → Login Items & Extensions.")
         schedule.install(cfg.sync_interval_minutes)
-        print(f"✓ Background sync switched on: every {cfg.sync_interval_minutes} minutes.")
+        print(f"✓ Background sync on: every {cfg.sync_interval_minutes} minutes.")
 
     # 4. Slow, visible import (newest day first, so the useful part lands first)
-    print(f"→ Importing {days} days from Garmin, newest first. Each line is one day saved.")
-    print("   (Safe to close Terminal now: anything left imports in the background.)")
-    r = sync.run(cfg, days=days, patient=True, progress=_printer())
+    print(f"→ Importing {days} days from Garmin, newest first, one request at a time.")
+    print("  You can close this window any time; the rest imports in the background.")
+    with Live() as live:
+        r = sync.run(cfg, days=days, patient=True, progress=live)
     if r.get("skipped"):
         print("   A background sync is already running; it will finish the import.")
         return 0
@@ -242,6 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--terminal", action="store_true")
     s.add_argument("--relogin", action="store_true")
     s.add_argument("--days", type=int, choices=IMPORT_CHOICES, help="skip the question")
+    s.add_argument("--reimport", action="store_true", help="import again even if data exists")
     s.set_defaults(fn=cmd_setup)
     s = sub.add_parser("login")
     s.add_argument("--terminal", action="store_true", help="prompt in the terminal, not dialogs")

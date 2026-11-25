@@ -70,6 +70,8 @@ Here's what will happen:
   5. Create the plugin file you add to Claude
 
 Everything stays on this Mac. Your Garmin password is never saved.
+macOS will tell you "garmin-stats can run in the background": that's the
+hourly sync, and it's expected.
 EOF
 
 if [ "$INTERACTIVE" = 1 ] && [ "$ASSUME_YES" = 0 ]; then

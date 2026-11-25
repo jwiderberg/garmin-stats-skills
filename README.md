@@ -65,6 +65,9 @@ developer tools: the installer explains each step and sets up everything itself.
 - Your password goes to Garmin once and is never stored. Only Garmin's sign-in
   token is kept on your Mac, readable by you alone.
 - Nothing is sent anywhere else, and nothing is ever written back to Garmin.
+- When the hourly sync is switched on, macOS shows *"garmin-stats can run in
+  the background"*. That's expected. You can turn it off under System
+  Settings → General → Login Items & Extensions.
 - If Garmin signs you out, you get a notification. Tell Claude *"reconnect my
   Garmin"* and the sign-in window comes back.
 

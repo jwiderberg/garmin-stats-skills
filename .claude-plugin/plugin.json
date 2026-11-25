@@ -1,7 +1,7 @@
 {
   "name": "garmin-stats-skills",
   "displayName": "Garmin Stats",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Ask Claude about your own Garmin data: sleep, HRV, heart rate, stress, Body Battery, workouts, training load, VO2max, weight and blood pressure. Syncs hourly to a private local copy on your Mac; read-only.",
   "author": {
     "name": "Jakob Widerberg",
