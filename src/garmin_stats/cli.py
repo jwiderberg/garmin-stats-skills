@@ -6,7 +6,7 @@
     garmin-stats sync [--days N]   sync now
     garmin-stats status            sign-in + cache summary
     garmin-stats schedule [--off]  start/stop the background sync
-    garmin-stats plugin-zip [--reveal]  build "Garmin Stats.zip" for Cowork
+    garmin-stats plugin-zip [--reveal]  build "Garmin-Stats.zip" for Cowork
     garmin-stats logout
     garmin-stats mcp               MCP server on stdio (Claude starts this)
 """

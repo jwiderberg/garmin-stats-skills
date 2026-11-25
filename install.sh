@@ -9,7 +9,7 @@
 #   3. asks you to sign in to Garmin in a normal Mac window
 #   4. downloads your recent data and turns on the hourly background sync
 #   5. adds the plugin to Claude Code if you have it, and builds
-#      "Garmin Stats.zip" to upload in the Claude desktop app (Cowork)
+#      "Garmin-Stats.zip" to upload in the Claude desktop app (Cowork)
 #
 # Developer options: --ref <branch|tag>, --no-setup, --no-claude-code
 set -euo pipefail
@@ -109,7 +109,7 @@ cat <<EOF
 
 $(printf '\033[1mAlmost done. One step left, in the Claude app:\033[0m')
    1. Click Customize (left sidebar), then Plugins
-   2. Click Upload plugin (under "+" or "Add") and choose "Garmin Stats.zip"
+   2. Click Upload plugin (under "+" or "Add") and choose "Garmin-Stats.zip"
       (a Finder window is showing it; you can also drag it in)
    Then ask Claude: "How did I sleep last night?"
 
@@ -122,7 +122,7 @@ CHOICE="$(osascript -e 'button returned of (display dialog "Garmin Stats is inst
 
 One step left, in the Claude app:
   1. Customize → Plugins
-  2. Upload plugin → choose \"Garmin Stats.zip\"
+  2. Upload plugin → choose \"Garmin-Stats.zip\"
      (the Finder window behind this one is showing it)
 
 Then ask Claude: \"How did I sleep last night?\"" with title "Garmin Stats" buttons {"Done", "Open Claude"} default button "Open Claude" with icon note)' 2>/dev/null || true)"

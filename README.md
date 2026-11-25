@@ -22,10 +22,10 @@ curl -fsSL https://raw.githubusercontent.com/jwiderberg/garmin-stats-skills/main
 password, and for a code if Garmin emails you one.
 
 **4. Add it to Claude.** When the installer finishes, a Finder window shows
-**Garmin Stats.zip**. In the Claude app:
+**Garmin-Stats.zip**. In the Claude app:
 
 1. Click **Customize**, then **Plugins**
-2. Click **Upload plugin** and choose **Garmin Stats.zip** (or drag it in)
+2. Click **Upload plugin** and choose **Garmin-Stats.zip** (or drag it in)
 
 Then ask: *"How did I sleep last night?"*
 
@@ -68,7 +68,7 @@ also attached to every [release](https://github.com/jwiderberg/garmin-stats-skil
 ## Update or uninstall
 
 To **update**, run the install line again, then upload the new
-**Garmin Stats.zip** (marketplace installs update on their own).
+**Garmin-Stats.zip** (marketplace installs update on their own).
 
 To **uninstall**:
 

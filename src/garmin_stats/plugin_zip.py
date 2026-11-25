@@ -10,7 +10,7 @@ from pathlib import Path
 
 from garmin_stats import paths
 
-ZIP_NAME = "Garmin Stats.zip"
+ZIP_NAME = "Garmin-Stats.zip"
 PLUGIN_ITEMS = (".claude-plugin/plugin.json", ".mcp.json", "skills", "README.md", "LICENSE")
 
 
