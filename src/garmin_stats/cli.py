@@ -1,95 +1,131 @@
-"""`garmin-stats` command line.
+"""`garmin-stats` command line. Beginners never need it: the installer runs
+`garmin-stats setup`, and Claude handles re-sign-in via garmin_connect.
 
-garmin-stats login [--force]   interactive Garmin login (email, password, MFA)
-garmin-stats status            is this computer logged in? (exit 0 = yes)
-garmin-stats logout            delete the saved session
-garmin-stats mcp               run the MCP server on stdio (Claude starts this)
-garmin-stats call METHOD ...   print a raw garminconnect response (debugging)
-garmin-stats clear-cache       drop cached past-day responses
+    garmin-stats setup             sign in, first sync, start hourly sync
+    garmin-stats login [--terminal]  sign in (macOS dialogs by default)
+    garmin-stats sync [--days N]   sync now
+    garmin-stats status            sign-in + cache summary
+    garmin-stats schedule [--off]  start/stop the background sync
+    garmin-stats logout
+    garmin-stats mcp               MCP server on stdio (Claude starts this)
 """
 
 from __future__ import annotations
 
 import argparse
 import getpass
-import json
-import os
-import shutil
 import sys
+from datetime import date
 
-from garmin_stats import __version__, paths
+from garmin_stats import __version__, client, config, mac, paths, schedule, sync
 
 
-def _tty_input(prompt: str) -> str:
-    """Read from the terminal even when stdin is a pipe (curl | bash)."""
+def _terminal_prompt(label: str, hidden: bool = False) -> str:
+    if hidden:
+        return getpass.getpass(label)
     try:
         with open("/dev/tty") as tty:
-            sys.stderr.write(prompt)
+            sys.stderr.write(label)
             sys.stderr.flush()
             return tty.readline().strip()
     except OSError:
-        return input(prompt).strip()
+        return input(label).strip()
 
 
-def cmd_login(args: argparse.Namespace) -> int:
-    from garminconnect import GarminConnectAuthenticationError, GarminConnectTooManyRequestsError
-
-    from garmin_stats import client
-
-    if paths.token_file().exists() and not args.force:
-        try:
-            name = client.session_client().get_full_name()
-            print(f"Already logged in to Garmin as {name}. Use --force to log in again.")
-            return 0
-        except client.NotLoggedIn:
-            print("Saved session is no longer valid; logging in again.")
-    email = os.environ.get("GARMIN_EMAIL") or _tty_input("Garmin Connect email: ")
-    password = os.environ.get("GARMIN_PASSWORD") or getpass.getpass("Garmin Connect password: ")
+def do_login(terminal: bool, force: bool = True) -> bool:
+    use_dialogs = mac.is_mac() and not terminal
+    ask = (lambda p, h=False: mac.ask(p, hidden=h)) if use_dialogs else _terminal_prompt
     try:
+        email = ask("Garmin Connect email: ")
+        password = ask("Garmin Connect password: ", True)
         name = client.login(
             email,
             password,
-            prompt_mfa=lambda: _tty_input("Garmin MFA code (check your email/app): "),
-            force=args.force,
+            force=force,
+            prompt_mfa=lambda: ask("Garmin sent you a verification code. Enter it: "),
         )
-    except GarminConnectAuthenticationError as e:
-        print(f"Login failed: {e}", file=sys.stderr)
+    except mac.Cancelled:
+        print("Sign-in cancelled.")
+        return False
+    except Exception as e:  # noqa: BLE001
+        msg = f"Sign-in failed: {e}"
+        print(msg, file=sys.stderr)
+        if use_dialogs:
+            mac.alert(msg)
+        return False
+    print(f"✓ Signed in to Garmin as {name}. (Your password was not saved.)")
+    return True
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    cfg = config.load()
+    needs_login = args.relogin or not paths.token_file().exists()
+    if needs_login and not do_login(args.terminal):
         return 1
-    except GarminConnectTooManyRequestsError:
+    print("Downloading your recent Garmin data (about a minute)…")
+    r = sync.run(cfg, days=cfg.refresh_days + cfg.backfill_per_run)
+    if not r["ok"]:
+        print(f"Sync problem: {r.get('message')}", file=sys.stderr)
+        return 1
+    print(f"✓ Saved {r['refreshed']} days and {r['activities']} activities.")
+    if mac.is_mac():
+        schedule.install(cfg.sync_interval_minutes)
         print(
-            "Garmin is rate-limiting logins from this network. Wait 10-15 minutes and retry.",
-            file=sys.stderr,
+            f"✓ Background sync every {cfg.sync_interval_minutes} minutes "
+            f"(older history fills in gradually, up to {cfg.history_days} days)."
         )
-        return 1
-    print(f"Logged in to Garmin as {name}.")
-    print(
-        f"Session saved to {paths.token_file()} (readable only by you). Your password was not stored."
-    )
     return 0
 
 
-def cmd_status(args: argparse.Namespace) -> int:
-    from garmin_stats import client
+def cmd_login(args: argparse.Namespace) -> int:
+    return 0 if do_login(args.terminal) else 1
 
-    if not paths.token_file().exists():
-        if not args.quiet:
-            print("Not logged in. Run: garmin-stats login")
-        return 1
-    try:
-        name = client.session_client().get_full_name()
-    except (client.NotLoggedIn, client.RateLimited) as e:
-        if not args.quiet:
-            print(str(e))
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    r = sync.run(config.load(), days=args.days)
+    if not r["ok"]:
+        msg = r.get("message", "sync failed")
+        # Tell a beginner once a day, not every hour.
+        flag = paths.home() / ".notified"
+        today = date.today().isoformat()
+        if mac.is_mac() and (not flag.exists() or flag.read_text() != today):
+            mac.notify(msg)
+            flag.write_text(today)
+        print(msg, file=sys.stderr)
         return 1
     if not args.quiet:
-        print(f"Logged in to Garmin as {name}.")
+        print(
+            f"✓ {r['refreshed']} days refreshed, {r['backfilled']} backfilled, "
+            f"{r['activities']} activities."
+        )
+    return 0
+
+
+def cmd_status(_: argparse.Namespace) -> int:
+    from garmin_stats.server import garmin_status
+
+    s = garmin_status()
+    print(f"Signed in: {'yes' if s['signed_in'] else 'no'}")
+    print(f"Background sync: {s['background_sync']}")
+    print(f"Last sync: {s['last_sync']}")
+    for t, c in s["coverage"].items():
+        print(f"  {t}: {c['rows']} rows ({c['first']} → {c['last']})")
+    print(f"Settings: {config.config_file()}")
+    return 0 if s["signed_in"] else 1
+
+
+def cmd_schedule(args: argparse.Namespace) -> int:
+    if args.off:
+        print("Background sync stopped." if schedule.remove() else "It wasn't running.")
+    else:
+        mins = config.load().sync_interval_minutes
+        schedule.install(mins)
+        print(f"Background sync every {mins} minutes.")
     return 0
 
 
 def cmd_logout(_: argparse.Namespace) -> int:
-    from garmin_stats import client
-
-    print("Logged out." if client.logout() else "No saved session.")
+    print("Signed out." if client.logout() else "Wasn't signed in.")
     return 0
 
 
@@ -100,43 +136,27 @@ def cmd_mcp(_: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_call(args: argparse.Namespace) -> int:
-    from garmin_stats import client
-    from garmin_stats.server import RAW_ALLOWED
-
-    if args.method not in RAW_ALLOWED:
-        print(f"Not an allowed read-only method: {args.method}", file=sys.stderr)
-        return 2
-    result = client.GarminData().call(args.method, *args.args)
-    print(json.dumps(result, indent=2, default=str))
-    return 0
-
-
-def cmd_clear_cache(_: argparse.Namespace) -> int:
-    shutil.rmtree(paths.cache_dir(), ignore_errors=True)
-    print("Cache cleared.")
-    return 0
-
-
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(
-        prog="garmin-stats", description="Your Garmin Connect data for Claude."
-    )
+    p = argparse.ArgumentParser(prog="garmin-stats")
     p.add_argument("--version", action="version", version=f"garmin-stats {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("login", help="log in to Garmin Connect (handles MFA)")
-    s.add_argument("--force", action="store_true", help="discard any saved session first")
+    s = sub.add_parser("setup")
+    s.add_argument("--terminal", action="store_true")
+    s.add_argument("--relogin", action="store_true")
+    s.set_defaults(fn=cmd_setup)
+    s = sub.add_parser("login")
+    s.add_argument("--terminal", action="store_true", help="prompt in the terminal, not dialogs")
     s.set_defaults(fn=cmd_login)
-    s = sub.add_parser("status", help="check the saved session")
-    s.add_argument("--quiet", "-q", action="store_true")
-    s.set_defaults(fn=cmd_status)
-    sub.add_parser("logout", help="delete the saved session").set_defaults(fn=cmd_logout)
-    sub.add_parser("mcp", help="run the MCP server on stdio").set_defaults(fn=cmd_mcp)
-    s = sub.add_parser("call", help="print a raw garminconnect response")
-    s.add_argument("method")
-    s.add_argument("args", nargs="*")
-    s.set_defaults(fn=cmd_call)
-    sub.add_parser("clear-cache", help="drop cached responses").set_defaults(fn=cmd_clear_cache)
+    s = sub.add_parser("sync")
+    s.add_argument("--days", type=int, default=None, help="refresh the last N days")
+    s.add_argument("--quiet", action="store_true")
+    s.set_defaults(fn=cmd_sync)
+    sub.add_parser("status").set_defaults(fn=cmd_status)
+    s = sub.add_parser("schedule")
+    s.add_argument("--off", action="store_true")
+    s.set_defaults(fn=cmd_schedule)
+    sub.add_parser("logout").set_defaults(fn=cmd_logout)
+    sub.add_parser("mcp").set_defaults(fn=cmd_mcp)
     args = p.parse_args(argv)
     return int(args.fn(args) or 0)
 

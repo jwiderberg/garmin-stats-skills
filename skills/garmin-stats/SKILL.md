@@ -1,87 +1,101 @@
 ---
 name: garmin-stats
-description: Answer questions about the user's own Garmin watch data — sleep, HRV, resting heart rate, stress, Body Battery, steps, calories, workouts/runs/rides, training status and load, training readiness, VO2max, race predictions, weight, blood pressure. Use when the user asks how they slept, how recovered or fit they are, what they did in a workout, how a metric is trending, or wants a weekly/monthly health or training review from Garmin.
+description: Answer questions about the user's own Garmin watch data — sleep, HRV, resting heart rate, stress, Body Battery, steps, calories, workouts, training status and load, Training Readiness, VO2max, weight, blood pressure — and trends over days, weeks or months. Use whenever the user asks how they slept, how recovered or fit they are, about a run/ride/workout, or wants a health or training summary from Garmin. Also use when they ask to connect or reconnect Garmin.
 ---
 
 # Garmin stats
 
-You have read-only access to the user's own Garmin Connect account through
-the `garmin` MCP server (tools listed below). It runs on the user's computer
-with their saved Garmin session; nothing is written back to Garmin.
+The `garmin` tools read a **local copy** of the user's Garmin Connect data,
+kept on their Mac and refreshed every hour in the background. Queries are
+instant and don't contact Garmin. Nothing is ever written to Garmin.
 
-## Before anything else
+## Tools
 
-If a tool errors with a login/session message, or this is the first Garmin
-question in the conversation and you're unsure, call `garmin_status`.
-If it says `logged_in: false`, stop and tell the user exactly:
-
-> Open Terminal and run `garmin-stats login` (email, password, and the MFA
-> code if Garmin asks). Then ask me again.
-
-If the MCP server itself is missing (no `garmin` tools at all, or the tool
-says it isn't set up), the user hasn't run the installer on this computer:
-
-> In Terminal run:
-> `curl -fsSL https://raw.githubusercontent.com/jwiderberg/garmin-stats-skills/main/install.sh | bash`
-
-Never ask the user for their Garmin password in chat.
-
-## Picking the tool
-
-| Question | Tool |
+| Tool | Use |
 |---|---|
-| "How did I sleep?" (last night = today's date) | `sleep(day)` |
-| "How recovered am I / should I train hard?" | `training_readiness`, `hrv`, `sleep`, `training_status` |
-| One day's totals (steps, calories, stress, Body Battery, RHR) | `daily_summary(day)` |
-| Trend over days/weeks ("my HRV this month") | `daily_range(start, end)` — ≤31 days per call |
-| Workouts list ("my runs in October") | `activities(start, end, activity_type)` |
-| One workout in depth, laps/splits | `activity_detail(activity_id, include_splits=true)` |
-| Training status, acute vs chronic load, ACWR | `training_status(day)` |
-| VO2max, fitness age, race predictions, PRs | `performance()` |
-| Weight / body composition | `body_composition(start, end)` |
-| Blood pressure | `blood_pressure(start, end)` |
-| All-day HR, stress, Body Battery detail | `heart_rate`, `stress_and_body_battery` |
-| Anything else Garmin has (floors, endurance/hill score, lactate threshold, devices, SpO2/respiration detail) | `garmin_raw(method, args)` |
+| `garmin_status` | **Call first** in a conversation. Sign-in state, last sync, date coverage, and every table's columns. |
+| `garmin_query(sql)` | Read-only SQLite `SELECT` over the cache. This is how you answer almost everything. |
+| `garmin_raw(day, kind)` | Garmin's full payload for one day: `sleep` (minute-level stages, HR, SpO2), `stats`, `hrv`, `training_status`, `readiness`, `activity:<id>`. Large; one at a time. |
+| `garmin_sync_now(days)` | Pull fresh data from Garmin now (default today + yesterday). Use when the question is about today and `last_sync` is over ~30 min old. |
+| `garmin_connect()` | Opens a macOS sign-in window on the user's Mac. |
 
-Dates: `YYYY-MM-DD`, or `"today"` / `"yesterday"`. Use the user's local
-calendar. Sleep is filed under the morning it ended, so "last night" is
-`sleep("today")`.
+## First, check the connection
 
-## Working efficiently
+Call `garmin_status`:
 
-- For more than a few days use `daily_range`, not repeated single-day calls.
-  For longer spans (a quarter, a year) call it in consecutive ≤31-day chunks.
-  Past days are cached on the user's computer, so re-asking is cheap.
-- Use `include=["sleep"]` (or `"daily"`, `"hrv"`) when only one part is needed.
-- `activities` accepts up to 366 days in one call — use it for workout history.
-- Only use `raw=true` when the compact fields don't answer the question
-  (e.g. minute-by-minute sleep stages, HR samples, lap-level detail). Raw sleep
-  is ~150 KB per night: fetch one night, not a range.
-- Garmin rate-limits aggressive use. If a tool reports rate limiting, stop,
-  tell the user, and suggest trying again in a few minutes. Don't retry in a loop.
+- **`signed_in: false`**, or a sync message says the sign-in expired: tell the
+  user *"A Garmin sign-in window is about to open on your Mac. Enter your
+  Garmin email, password, and the code if Garmin sends one."* Then call
+  `garmin_connect`. **Never ask for the password in chat.**
+- **`coverage.daily.rows` is small**: history is still filling in. The hourly
+  sync backfills older days gradually. Answer with what's there, and say so.
+- **The `garmin` tools are missing or fail to start**: the helper isn't
+  installed on this Mac. Tell the user to open the Terminal app, paste this,
+  and press Return:
+  `curl -fsSL https://raw.githubusercontent.com/jwiderberg/garmin-stats-skills/main/install.sh | bash`
+
+## Tables (SQLite, dates are `YYYY-MM-DD` local)
+
+- **`daily`**, one row per day: `steps`, `distance_km`, `active_kcal`,
+  `intensity_min_moderate/vigorous`, `resting_hr`, `stress_avg`,
+  `body_battery_high/low/at_wake`, `spo2_avg`, `respiration_avg_waking`;
+  sleep `sleep_score`, `sleep_min`, `deep_min`, `light_min`, `rem_min`,
+  `awake_min`, `nap_min`, `sleep_start_local`/`sleep_end_local`;
+  `hrv_last_night_ms`, `hrv_weekly_avg_ms`, `hrv_status`,
+  `hrv_baseline_low_ms`/`hrv_baseline_high_ms`; training `training_status`,
+  `acute_load_7d`, `chronic_load_28d`, `acute_chronic_ratio`, `acwr_status`,
+  `vo2max`, `fitness_age`, `readiness_score`, `readiness_level`.
+  **Sleep is filed under the morning it ended**, so last night is today's row.
+- **`activities`**: `activity_id`, `date`, `start_local`, `type` (e.g.
+  `running`, `cycling`, `strength_training`, `lap_swimming`), `name`,
+  `duration_min`, `distance_km`, `avg_pace_min_per_km`, `avg_hr`, `max_hr`,
+  `calories`, `elevation_gain_m`, `aerobic_training_effect`,
+  `anaerobic_training_effect`, `training_load`.
+- **`weigh_ins`**: `date`, `weight_kg`, `bmi`, `body_fat_pct`, `muscle_mass_kg`.
+- **`blood_pressure`**: `measured_local`, `systolic`, `diastolic`, `pulse`, `category`.
+
+`garmin_status.schema` is the authoritative column list.
+
+## Example queries
+
+```sql
+-- last night
+SELECT sleep_score, sleep_min, deep_min, rem_min, hrv_last_night_ms, hrv_status
+FROM daily WHERE date = date('now','localtime');
+
+-- 30-day trend
+SELECT date, resting_hr, hrv_last_night_ms, sleep_score, stress_avg
+FROM daily WHERE date >= date('now','localtime','-29 days') ORDER BY date;
+
+-- this week vs last week
+SELECT CASE WHEN date >= date('now','localtime','-6 days') THEN 'this week' ELSE 'last week' END AS wk,
+       round(avg(sleep_min)/60.0,1) AS sleep_h, round(avg(hrv_last_night_ms)) AS hrv,
+       round(avg(resting_hr)) AS rhr, sum(steps) AS steps
+FROM daily WHERE date >= date('now','localtime','-13 days') GROUP BY wk;
+
+-- running by month
+SELECT strftime('%Y-%m', date) AS month, count(*) AS runs, round(sum(distance_km),1) AS km,
+       round(avg(avg_pace_min_per_km),2) AS pace
+FROM activities WHERE type LIKE '%running%' GROUP BY month ORDER BY month;
+```
 
 ## Reading the data honestly
 
-- `null` means no data (watch not worn, feature not supported, not synced yet),
-  **not zero**. Say "no data for Tuesday", never treat it as a bad day.
-  Today's numbers are partial until the day ends, and the watch must have
-  synced with the Garmin Connect app.
-- Training load 0 with status DETRAINING / RECOVERY is real (rest), not missing.
-- Training status and readiness are Garmin's own labels — attribute them
-  ("Garmin rates your status as *productive*"). Garmin's acute:chronic ratio is
-  usually healthy around 0.8–1.5; quote Garmin's `acwr_status` rather than
-  inventing thresholds.
-- HRV is personal: compare against the user's own `baseline_low_ms`–
-  `baseline_high_ms` and weekly average, not population norms.
-- Compare like with like (weekdays vs weekdays, same activity type).
-- When you summarise a period, show the numbers (a small table works well),
-  then the pattern, then caveats about gaps.
-- See `references/metrics.md` for what each metric means and its units.
+- **NULL means no data** (watch not worn, feature unsupported, not synced),
+  never zero. Say "no data for Tuesday". Exclude NULLs from averages (SQL
+  `avg()` already does) and mention gaps.
+- Today's totals are partial until the day ends, and only include what the
+  watch has synced to the Garmin Connect phone app.
+- `training_status`, `readiness_*` and `acwr_status` are Garmin's own labels:
+  attribute them ("Garmin rates you *productive*"). Training load 0 on a
+  rest day is real.
+- HRV is personal: compare it with the user's `hrv_baseline_low_ms`–
+  `hrv_baseline_high_ms` and recent average, not with population norms.
+- Lead with the numbers (a small table or chart), then the pattern, then caveats.
 
 ## Boundaries
 
-This is the user's own data, for their own insight. Describe what the data
-shows; don't diagnose. If something looks medically concerning (e.g. very
-high blood pressure readings, resting HR far outside the user's normal range,
-SpO2 persistently low), say plainly that it's worth raising with a doctor —
-don't speculate about causes.
+This is the user's own data, for their own insight. Describe what it shows
+and don't diagnose. If something looks medically concerning (very high blood
+pressure, resting HR far above their normal, persistently low SpO2), say
+plainly that it's worth raising with a doctor.

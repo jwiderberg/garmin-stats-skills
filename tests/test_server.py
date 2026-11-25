@@ -2,74 +2,64 @@ import asyncio
 from datetime import date
 
 import pytest
+from fakes import FakeGarmin
 
-from garmin_stats import client, server
+from garmin_stats import config, server, sync
 
 
 @pytest.fixture()
-def fake_data(monkeypatch):
-    class Fake:
-        def get_stats(self, d):
-            return {"calendarDate": d, "totalSteps": 5000}
-
-        def get_sleep_data(self, d):
-            return {
-                "dailySleepDTO": {
-                    "calendarDate": d,
-                    "sleepTimeSeconds": 25200,
-                    "sleepScores": {"overall": {"value": 80}},
-                }
-            }
-
-        def get_hrv_data(self, d):
-            return {"hrvSummary": {"lastNightAvg": 50, "status": "BALANCED"}}
-
-        def get_full_name(self):
-            return "Test User"
-
-    data = client.GarminData(factory=Fake, today=lambda: date(2026, 5, 10))
-    monkeypatch.setattr(server, "data", data)
-    return data
+def synced():
+    sync.run(config.load(), garmin=FakeGarmin(), today=date.today(), days=3)
 
 
-def test_all_tools_registered():
+def test_tools():
     names = {t.name for t in asyncio.run(server.mcp.list_tools())}
-    assert {
+    assert names == {
         "garmin_status",
-        "sleep",
-        "daily_range",
-        "activities",
-        "training_status",
-        "performance",
+        "garmin_query",
         "garmin_raw",
-    } <= names
+        "garmin_sync_now",
+        "garmin_connect",
+    }
 
 
-def test_daily_range_merges_parts(fake_data):
-    rows = server.daily_range("2026-05-08", "2026-05-10")
-    assert [r["date"] for r in rows] == ["2026-05-08", "2026-05-09", "2026-05-10"]
-    r = rows[0]
-    assert r["steps"] == 5000 and r["sleep_score"] == 80 and r["sleep_min"] == 420
-    assert r["hrv_last_night_ms"] == 50
+def test_status_on_empty_cache():
+    s = server.garmin_status()
+    assert s["signed_in"] is False and s["coverage"]["daily"]["rows"] == 0
+    assert "sleep_score" in s["schema"]["daily"]
 
 
-def test_daily_range_include_subset(fake_data):
-    rows = server.daily_range("2026-05-10", "today", include=["sleep"])
-    assert "steps" not in rows[0] and rows[0]["sleep_score"] == 80
+def test_query(synced):
+    r = server.garmin_query("SELECT date, steps FROM daily ORDER BY date")
+    assert r["columns"] == ["date", "steps"] and len(r["rows"]) == 3 and not r["truncated"]
 
 
-def test_range_cap(fake_data):
-    with pytest.raises(ValueError, match="max 31"):
-        server.daily_range("2026-01-01", "2026-05-10")
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DELETE FROM daily",
+        "UPDATE daily SET steps=0",
+        "DROP TABLE daily",
+        "SELECT 1; DELETE FROM daily",
+        "PRAGMA table_info(daily)",
+        "WITH x AS (SELECT 1) INSERT INTO daily(date) SELECT 1",
+        "ATTACH DATABASE '/tmp/x' AS x",
+    ],
+)
+def test_query_rejects_writes(synced, sql):
+    with pytest.raises(ValueError):
+        server.garmin_query(sql)
 
 
-def test_raw_is_allowlisted(fake_data):
-    with pytest.raises(ValueError, match="not allowed"):
-        server.garmin_raw("upload_activity", ["x"])
-    with pytest.raises(ValueError, match="not allowed"):
-        server.garmin_raw("delete_blood_pressure", [])
-    assert all(m.startswith("get_") for m in server.RAW_ALLOWED)
+def test_query_connection_is_readonly_even_if_regex_missed(synced):
+    import sqlite3
+
+    conn = server._conn()
+    with pytest.raises(sqlite3.OperationalError):
+        conn.execute("INSERT INTO daily(date) VALUES ('x')")
 
 
-def test_status_without_login():
-    assert server.garmin_status()["logged_in"] is False
+def test_raw(synced):
+    today = date.today().isoformat()
+    assert server.garmin_raw(today, "sleep")["sleepLevels"]
+    assert "error" in server.garmin_raw("1999-01-01", "sleep")

@@ -1,147 +1,129 @@
-#!/usr/bin/env bash
-# garmin-stats-skills installer (macOS / Linux).
+#!/bin/bash
+# Garmin Stats for Claude: installer for macOS.
 #
 #   curl -fsSL https://raw.githubusercontent.com/jwiderberg/garmin-stats-skills/main/install.sh | bash
 #
-# or, from a clone:  ./install.sh
+# Safe to run again at any time (that's also how you update). It:
+#   1. installs uv (Astral's tool that manages Python) if needed
+#   2. installs the garmin-stats helper (Python is downloaded automatically)
+#   3. asks you to sign in to Garmin in a normal Mac window
+#   4. downloads your recent data and turns on the hourly background sync
+#   5. adds the plugin to Claude Code if you have it, then shows the one
+#      step left for the Claude desktop app (Cowork)
 #
-# What it does (idempotent, safe to re-run to upgrade):
-#   1. installs uv (Astral's Python tool manager) if you don't have it
-#   2. installs the `garmin-stats` command (Python 3.12+ is fetched by uv if needed)
-#   3. writes ~/.garmin-stats-skills/run-mcp.sh, the launcher Claude starts
-#   4. logs you in to Garmin Connect (email, password, MFA code) — the password
-#      is used once and never stored; only Garmin's session token is saved
-#   5. adds the plugin to Claude Code if the `claude` CLI is installed
-#   6. prints the two clicks needed to add it to Claude Cowork
-#
-# Options (with curl: ... | bash -s -- --no-login):
-#   --no-login        skip the Garmin login step
-#   --no-claude-code  don't register the plugin with Claude Code
-#   --ref <git-ref>   install a specific branch/tag (default: main)
+# Developer options: --ref <branch|tag>, --no-setup, --no-claude-code
 set -euo pipefail
 
 REPO="${GARMIN_STATS_REPO:-jwiderberg/garmin-stats-skills}"
 REF="main"
-DO_LOGIN=1
+DO_SETUP=1
 DO_CLAUDE_CODE=1
 while [ $# -gt 0 ]; do
     case "$1" in
-        --no-login) DO_LOGIN=0 ;;
-        --no-claude-code) DO_CLAUDE_CODE=0 ;;
         --ref) REF="$2"; shift ;;
-        -h|--help) sed -n '2,24p' "$0" 2>/dev/null || true; exit 0 ;;
-        *) echo "unknown option: $1" >&2; exit 2 ;;
+        --no-setup) DO_SETUP=0 ;;
+        --no-claude-code) DO_CLAUDE_CODE=0 ;;
+        *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
     shift
 done
 
 APP_HOME="${GARMIN_STATS_HOME:-$HOME/.garmin-stats-skills}"
-bold() { printf '\033[1m%s\033[0m\n' "$*"; }
-ok() { printf '  \033[32m✓\033[0m %s\n' "$*"; }
-warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
-die() { printf '  \033[31m✗\033[0m %s\n' "$*" >&2; exit 1; }
+step() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+ok() { printf '   \033[32m✓\033[0m %s\n' "$*"; }
+fail() {
+    printf '\n   \033[31m✗ %s\033[0m\n' "$*" >&2
+    printf '   Nothing was broken. You can safely run the installer again.\n' >&2
+    exit 1
+}
 
-case "$(uname -s)" in
-    Darwin|Linux) ;;
-    *) die "Only macOS and Linux are supported for now." ;;
-esac
+[ "$(uname -s)" = "Darwin" ] || fail "This installer is for macOS."
 
-# Running from a clone? Install that checkout instead of fetching from GitHub.
-LOCAL_SRC=""
+# From a downloaded copy of the repo? Install that copy.
+SRC=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
     _dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if [ -f "$_dir/pyproject.toml" ] && grep -q 'name = "garmin-stats-skills"' "$_dir/pyproject.toml"; then
-        LOCAL_SRC="$_dir"
-    fi
+    grep -qs 'name = "garmin-stats-skills"' "$_dir/pyproject.toml" && SRC="$_dir"
 fi
-if [ -n "$LOCAL_SRC" ]; then
-    PKG_SRC="$LOCAL_SRC"
-    MARKETPLACE_SRC="$LOCAL_SRC"
-else
-    PKG_SRC="git+https://github.com/${REPO}@${REF}"
-    MARKETPLACE_SRC="$REPO"
-fi
+# Otherwise install from GitHub as an archive: no git / Xcode tools needed.
+PKG="${SRC:-garmin-stats-skills @ https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz}"
 
-bold "garmin-stats-skills installer"
+printf '\n\033[1mGarmin Stats for Claude\033[0m: setting up. This takes 1–2 minutes.\n'
 
-# ── 1. uv ────────────────────────────────────────────────────────────────
-bold "[1/5] uv"
-export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
+step "1/4  Getting the tools ready"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if ! command -v uv >/dev/null 2>&1; then
-    echo "  uv not found — installing it from astral.sh (https://docs.astral.sh/uv/)"
-    curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
-    export PATH="$HOME/.local/bin:$PATH"
-    command -v uv >/dev/null 2>&1 || die "uv install failed — install it manually, then re-run."
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh >/dev/null 2>&1 \
+        || fail "Couldn't download uv. Check your internet connection."
 fi
-UV="$(command -v uv)"
-ok "uv $("$UV" --version | awk '{print $2}') at $UV"
+UV="$(command -v uv)" || fail "uv didn't install."
+ok "ready"
 
-# ── 2. garmin-stats ──────────────────────────────────────────────────────
-bold "[2/5] garmin-stats command"
-"$UV" tool install --force --reinstall --python 3.12 "$PKG_SRC" >/dev/null 2>&1 \
-    || "$UV" tool install --force --reinstall --python 3.12 "$PKG_SRC" \
-    || die "Could not install garmin-stats from $PKG_SRC"
+step "2/4  Installing Garmin Stats"
+"$UV" tool install --quiet --force --reinstall --python 3.12 "$PKG" >/dev/null 2>&1 \
+    || "$UV" tool install --force --reinstall --python 3.12 "$PKG" \
+    || fail "Couldn't install Garmin Stats."
 EXE="$("$UV" tool dir --bin)/garmin-stats"
-[ -x "$EXE" ] || die "garmin-stats not found at $EXE after install"
-ok "$("$EXE" --version) at $EXE"
-
-# ── 3. launcher ──────────────────────────────────────────────────────────
-bold "[3/5] launcher for Claude"
-mkdir -p "$APP_HOME"
-chmod 700 "$APP_HOME"
+[ -x "$EXE" ] || fail "Garmin Stats didn't install correctly."
+mkdir -p "$APP_HOME" && chmod 700 "$APP_HOME"
 cat > "$APP_HOME/run-mcp.sh" <<EOF
 #!/bin/sh
-# Started by Claude (plugin .mcp.json). Regenerated by install.sh.
+# Started by Claude. Rewritten each time install.sh runs.
 export GARMIN_STATS_HOME="$APP_HOME"
 exec "$EXE" mcp "\$@"
 EOF
 chmod 755 "$APP_HOME/run-mcp.sh"
-ok "$APP_HOME/run-mcp.sh"
+ok "$("$EXE" --version)"
 
-# ── 4. Garmin login ──────────────────────────────────────────────────────
-bold "[4/5] Garmin Connect login"
-if [ "$DO_LOGIN" = 0 ]; then
-    warn "skipped (--no-login). Run 'garmin-stats login' before using it."
-elif "$EXE" status --quiet; then
-    ok "already logged in ($("$EXE" status))"
-else
-    echo "  Your password is sent only to Garmin and is not stored."
-    if "$EXE" login; then
-        ok "logged in"
+step "3/4  Connecting your Garmin account"
+if [ "$DO_SETUP" = 1 ]; then
+    echo "   A window will ask for your Garmin email and password (and a code if"
+    echo "   Garmin sends you one). Your password goes only to Garmin and isn't saved."
+    if GARMIN_STATS_HOME="$APP_HOME" "$EXE" setup; then
+        ok "connected, data downloaded, hourly sync on"
     else
-        warn "login didn't complete — run 'garmin-stats login' in Terminal to retry."
+        printf '   \033[33m!\033[0m Not connected yet. No problem: later, just ask Claude\n'
+        printf '     "connect my Garmin" and the sign-in window will appear again.\n'
     fi
+else
+    ok "skipped (--no-setup)"
 fi
 
-# ── 5. Claude Code ───────────────────────────────────────────────────────
-bold "[5/5] Claude Code plugin"
-if [ "$DO_CLAUDE_CODE" = 0 ]; then
-    warn "skipped (--no-claude-code)"
-elif ! command -v claude >/dev/null 2>&1; then
-    warn "'claude' CLI not found — skipping (Cowork setup is below)."
-else
-    if claude plugin marketplace list 2>/dev/null | grep -q "garmin-stats-skills"; then
-        claude plugin marketplace update garmin-stats-skills >/dev/null 2>&1 || true
-    else
-        claude plugin marketplace add "$MARKETPLACE_SRC" >/dev/null \
-            || warn "could not add marketplace $MARKETPLACE_SRC"
-    fi
-    if claude plugin install garmin-stats-skills@garmin-stats-skills >/dev/null 2>&1 \
-        || claude plugin update garmin-stats-skills@garmin-stats-skills >/dev/null 2>&1; then
-        ok "installed in Claude Code (restart any open Claude Code sessions)"
-    else
-        warn "couldn't install automatically. In Claude Code run:"
-        echo "      /plugin marketplace add $REPO"
-        echo "      /plugin install garmin-stats-skills@garmin-stats-skills"
-    fi
+step "4/4  Adding it to Claude"
+if [ "$DO_CLAUDE_CODE" = 1 ] && command -v claude >/dev/null 2>&1; then
+    MP="${SRC:-$REPO}"
+    claude plugin marketplace list 2>/dev/null | grep -q garmin-stats-skills \
+        && claude plugin marketplace update garmin-stats-skills >/dev/null 2>&1 \
+        || claude plugin marketplace add "$MP" >/dev/null 2>&1 || true
+    { claude plugin install garmin-stats-skills@garmin-stats-skills >/dev/null 2>&1 \
+        || claude plugin update garmin-stats-skills@garmin-stats-skills >/dev/null 2>&1; } \
+        && ok "added to Claude Code"
+fi
+INTERACTIVE=0
+[ -t 1 ] && INTERACTIVE=1   # a real Terminal window, not a script / CI
+if [ "$INTERACTIVE" = 1 ]; then
+    printf '%s' "$REPO" | pbcopy
+    ok "copied \"$REPO\" to your clipboard for the last step"
 fi
 
 cat <<EOF
 
-$(bold "Done.") To use it in Claude Cowork (desktop app):
-  1. Customize → Plugins → Add marketplace → enter:  $REPO
-  2. Install "Garmin Stats", then ask: "How did I sleep last night?"
-
-Re-run this installer any time to upgrade. Uninstall:
-  curl -fsSL https://raw.githubusercontent.com/$REPO/main/uninstall.sh | bash
+$(printf '\033[1mAlmost done. One step left, in the Claude app:\033[0m')
+   1. Click Customize (left sidebar), then Plugins
+   2. Click "Add marketplace", paste (⌘V), and press Enter
+   3. Click Install on "Garmin Stats"
+   Then ask Claude: "How did I sleep last night?"
 EOF
+
+[ "$INTERACTIVE" = 1 ] || exit 0
+CHOICE="$(osascript -e 'button returned of (display dialog "Garmin Stats is installed.
+
+One step left, in the Claude app:
+  1. Customize → Plugins
+  2. Add marketplace → paste (⌘V) → Enter
+  3. Install \"Garmin Stats\"
+
+Then ask: \"How did I sleep last night?\"" with title "Garmin Stats" buttons {"Done", "Open Claude"} default button "Open Claude" with icon note)' 2>/dev/null || true)"
+if [ "$CHOICE" = "Open Claude" ]; then
+    open -a Claude 2>/dev/null || open "https://claude.ai/download"
+fi
