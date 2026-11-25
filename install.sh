@@ -8,8 +8,8 @@
 #   2. installs the garmin-stats helper (Python is downloaded automatically)
 #   3. asks you to sign in to Garmin in a normal Mac window
 #   4. downloads your recent data and turns on the hourly background sync
-#   5. adds the plugin to Claude Code if you have it, then shows the one
-#      step left for the Claude desktop app (Cowork)
+#   5. adds the plugin to Claude Code if you have it, and builds
+#      "Garmin Stats.zip" to upload in the Claude desktop app (Cowork)
 #
 # Developer options: --ref <branch|tag>, --no-setup, --no-claude-code
 set -euo pipefail
@@ -99,31 +99,33 @@ if [ "$DO_CLAUDE_CODE" = 1 ] && command -v claude >/dev/null 2>&1; then
         || claude plugin update garmin-stats-skills@garmin-stats-skills >/dev/null 2>&1; } \
         && ok "added to Claude Code"
 fi
+ZIP="$(GARMIN_STATS_HOME="$APP_HOME" "$EXE" plugin-zip)" || fail "Couldn't build the plugin file."
+ok "plugin file ready: $ZIP"
+
 INTERACTIVE=0
 [ -t 1 ] && INTERACTIVE=1   # a real Terminal window, not a script / CI
-if [ "$INTERACTIVE" = 1 ]; then
-    printf '%s' "$REPO" | pbcopy
-    ok "copied \"$REPO\" to your clipboard for the last step"
-fi
 
 cat <<EOF
 
 $(printf '\033[1mAlmost done. One step left, in the Claude app:\033[0m')
    1. Click Customize (left sidebar), then Plugins
-   2. Click "Add marketplace", paste (⌘V), and press Enter
-   3. Click Install on "Garmin Stats"
+   2. Click Upload plugin (under "+" or "Add") and choose "Garmin Stats.zip"
+      (a Finder window is showing it; you can also drag it in)
    Then ask Claude: "How did I sleep last night?"
+
+   (Prefer automatic updates? Use "Add marketplace" with $REPO instead.)
 EOF
 
 [ "$INTERACTIVE" = 1 ] || exit 0
+open -R "$ZIP" 2>/dev/null || true   # show the zip in Finder, ready to drag
 CHOICE="$(osascript -e 'button returned of (display dialog "Garmin Stats is installed.
 
 One step left, in the Claude app:
   1. Customize → Plugins
-  2. Add marketplace → paste (⌘V) → Enter
-  3. Install \"Garmin Stats\"
+  2. Upload plugin → choose \"Garmin Stats.zip\"
+     (the Finder window behind this one is showing it)
 
-Then ask: \"How did I sleep last night?\"" with title "Garmin Stats" buttons {"Done", "Open Claude"} default button "Open Claude" with icon note)' 2>/dev/null || true)"
+Then ask Claude: \"How did I sleep last night?\"" with title "Garmin Stats" buttons {"Done", "Open Claude"} default button "Open Claude" with icon note)' 2>/dev/null || true)"
 if [ "$CHOICE" = "Open Claude" ]; then
     open -a Claude 2>/dev/null || open "https://claude.ai/download"
 fi

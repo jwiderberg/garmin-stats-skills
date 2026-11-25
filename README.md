@@ -21,12 +21,11 @@ curl -fsSL https://raw.githubusercontent.com/jwiderberg/garmin-stats-skills/main
 **3. Sign in to Garmin.** A normal Mac window asks for your Garmin email and
 password, and for a code if Garmin emails you one.
 
-**4. Add it to Claude.** When the installer finishes, it copies what you need
-and offers to open Claude. In Claude:
+**4. Add it to Claude.** When the installer finishes, a Finder window shows
+**Garmin Stats.zip**. In the Claude app:
 
 1. Click **Customize**, then **Plugins**
-2. Click **Add marketplace**, paste (**⌘V**), and press **Return**
-3. Click **Install** on **Garmin Stats**
+2. Click **Upload plugin** and choose **Garmin Stats.zip** (or drag it in)
 
 Then ask: *"How did I sleep last night?"*
 
@@ -62,9 +61,14 @@ The settings file is `~/.garmin-stats-skills/config.toml`. In Finder, press
 
 After changing `sync_interval_minutes`, run `garmin-stats schedule` once.
 
+**Prefer automatic plugin updates?** Instead of uploading the zip, use
+**Add marketplace** and enter `jwiderberg/garmin-stats-skills`. The zip is
+also attached to every [release](https://github.com/jwiderberg/garmin-stats-skills/releases).
+
 ## Update or uninstall
 
-To **update**, run the install line again.
+To **update**, run the install line again, then upload the new
+**Garmin Stats.zip** (marketplace installs update on their own).
 
 To **uninstall**:
 
@@ -91,7 +95,8 @@ schema and how to read the data. A launchd agent
 (`com.garmin-stats-skills.sync`) runs `garmin-stats sync` on a schedule.
 
 ```
-garmin-stats setup | login [--terminal] | sync [--days N] | status | schedule [--off] | logout
+garmin-stats setup | login [--terminal] | sync [--days N] | status | schedule [--off]
+             plugin-zip [--reveal] | logout
 ```
 
 ```bash

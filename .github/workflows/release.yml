@@ -1,0 +1,24 @@
+name: release
+# Push a tag like v0.2.0 → GitHub release with "Garmin Stats.zip" attached
+# (the Claude plugin, for Cowork's Customize → Plugins → Upload plugin).
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --extra dev --python 3.12
+      - run: uv run pytest -q
+      - name: check tag matches plugin version
+        run: |
+          v=$(python3 -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["version"])')
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != plugin version $v"; exit 1; }
+      - run: uv run garmin-stats plugin-zip --out dist
+      - run: gh release create "$GITHUB_REF_NAME" "dist/Garmin Stats.zip" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

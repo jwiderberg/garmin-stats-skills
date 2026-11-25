@@ -6,6 +6,7 @@
     garmin-stats sync [--days N]   sync now
     garmin-stats status            sign-in + cache summary
     garmin-stats schedule [--off]  start/stop the background sync
+    garmin-stats plugin-zip [--reveal]  build "Garmin Stats.zip" for Cowork
     garmin-stats logout
     garmin-stats mcp               MCP server on stdio (Claude starts this)
 """
@@ -124,6 +125,20 @@ def cmd_schedule(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plugin_zip(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from garmin_stats import plugin_zip
+
+    out = plugin_zip.build(Path(args.out).expanduser() if args.out else None)
+    print(out)
+    if args.reveal and mac.is_mac():
+        import subprocess
+
+        subprocess.run(["open", "-R", str(out)], check=False)
+    return 0
+
+
 def cmd_logout(_: argparse.Namespace) -> int:
     print("Signed out." if client.logout() else "Wasn't signed in.")
     return 0
@@ -155,6 +170,10 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("schedule")
     s.add_argument("--off", action="store_true")
     s.set_defaults(fn=cmd_schedule)
+    s = sub.add_parser("plugin-zip", help="build the Claude plugin zip for Cowork upload")
+    s.add_argument("--out", help="output folder (default ~/.garmin-stats-skills)")
+    s.add_argument("--reveal", action="store_true", help="show it in Finder")
+    s.set_defaults(fn=cmd_plugin_zip)
     sub.add_parser("logout").set_defaults(fn=cmd_logout)
     sub.add_parser("mcp").set_defaults(fn=cmd_mcp)
     args = p.parse_args(argv)

@@ -24,6 +24,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/garmin_stats"]
 
+# Ship the Claude plugin itself inside the package, so `garmin-stats
+# plugin-zip` can build the Cowork upload from any installation.
+[tool.hatch.build.targets.wheel.force-include]
+".claude-plugin" = "garmin_stats/plugin/.claude-plugin"
+".mcp.json" = "garmin_stats/plugin/.mcp.json"
+"skills" = "garmin_stats/plugin/skills"
+"README.md" = "garmin_stats/plugin/README.md"
+"LICENSE" = "garmin_stats/plugin/LICENSE"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
