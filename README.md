@@ -28,8 +28,12 @@ Works in the Claude desktop app (Cowork) and Claude Code. macOS only.
    enter that too.
 4. Pick how much history to import: 30, 60 or 90 days. You'll see each day
    arrive as it's saved.
-5. A Finder window opens with **Garmin-Stats.zip**. In Claude, go to
-   **Customize → Plugins → Upload plugin** and choose it.
+5. A Finder window opens with **Garmin-Stats.zip**. In Claude: **Settings →
+   Plugins**, scroll down to **Browse plugins**, then **Add** (top right) →
+   **Upload plugin**. Drag the zip in and click **Upload**.
+6. Claude warns that *"This plugin includes local MCP servers"*. That's
+   expected: the server is the helper you just installed, reading the data on
+   your Mac. Click **Continue**.
 
 Then ask Claude *"How did I sleep last night?"*
 
@@ -93,7 +97,8 @@ Garmin can change that whenever it likes. Use it for your own account.
 
 To **update**, run the install line again and upload the new zip. If you'd
 rather have updates arrive on their own, add `jwiderberg/garmin-stats-skills`
-under **Customize → Plugins → Add marketplace** instead of uploading the zip.
+under **Settings → Plugins → Browse plugins → Add → Add marketplace** instead
+of uploading the zip.
 
 To **uninstall**, run this, then remove the plugin in Claude:
 

@@ -16,4 +16,4 @@ fi
 command -v uv >/dev/null 2>&1 && uv tool uninstall garmin-stats-skills >/dev/null 2>&1 \
     && echo "✓ helper removed"
 rm -rf "$APP_HOME" && echo "✓ deleted $APP_HOME (sign-in + cached data)"
-echo "Done. In the Claude app, remove \"Garmin Stats\" under Customize → Plugins."
+echo "Done. In the Claude app, remove \"Garmin Stats\" under Settings → Plugins."

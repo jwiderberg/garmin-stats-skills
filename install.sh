@@ -163,9 +163,14 @@ else
 fi
 cat <<EOF
 
-   1. Click ${B}Customize${N} (left sidebar), then ${B}Plugins${N}
-   2. Click ${B}Upload plugin${N} and choose ${B}Garmin-Stats.zip${N}
+   1. Open ${B}Settings${N}, then ${B}Plugins${N}
+   2. Scroll to the bottom and click ${B}Browse plugins${N}
+   3. Click ${B}Add${N} (top right), then ${B}Upload plugin${N}
+   4. Drag in ${B}Garmin-Stats.zip${N} and click ${B}Upload${N}
       (it's in $APP_HOME; a Finder window shows it)
+   5. Claude warns: ${B}"This plugin includes local MCP servers"${N}. That's
+      expected: "garmin" is the helper you just installed, reading your data
+      on this Mac. Click ${B}Continue${N}.
 
    Then ask Claude: ${B}"How did I sleep last night?"${N}
 
@@ -182,18 +187,22 @@ say "  curl -fsSL https://raw.githubusercontent.com/$REPO/main/uninstall.sh | ba
 [ "$GUI" = 1 ] || exit 0
 open -R "$ZIP" 2>/dev/null || true
 if [ "$SIGNED_IN" = 1 ]; then
-    MSG="Garmin Stats is installed and your data is importing.
+    MSG="Garmin Stats is installed and your data is imported.
 
 One last step, in the Claude app:
-  1. Customize → Plugins
-  2. Upload plugin → choose Garmin-Stats.zip
+  1. Settings → Plugins
+  2. Scroll down → Browse plugins
+  3. Add (top right) → Upload plugin
+  4. Drag in Garmin-Stats.zip → Upload
      (the Finder window behind this one is showing it)
+  5. Claude warns the plugin runs a local MCP server. That's expected
+     (it's the helper you just installed). Click Continue.
 
 Then ask Claude: How did I sleep last night?"
 else
     MSG="Garmin Stats is installed, but not connected to Garmin yet.
 
-Add it to the Claude app (Customize → Plugins → Upload plugin → Garmin-Stats.zip), then ask Claude: connect my Garmin"
+Add it to the Claude app: Settings → Plugins → Browse plugins (at the bottom) → Add → Upload plugin → drag in Garmin-Stats.zip → Upload → Continue. Then ask Claude: connect my Garmin"
 fi
 CHOICE="$(osascript - "$MSG" <<'OSA' 2>/dev/null || true
 on run argv

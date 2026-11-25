@@ -1,5 +1,5 @@
-"""Build the Claude plugin as a zip for Cowork's Customize → Plugins →
-Upload plugin. The plugin files ship inside the wheel (pyproject
+"""Build the Claude plugin as a zip for Claude's Settings → Plugins →
+Browse plugins → Add → Upload plugin. The plugin files ship inside the wheel (pyproject
 force-include) so the zip always matches the installed helper's version;
 in a source checkout they're read from the repo root."""
 
