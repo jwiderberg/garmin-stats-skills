@@ -150,3 +150,79 @@ def test_progress_reports_each_day():
         progress=lambda e, **k: seen.append((e, k.get("i"), k.get("n"))),
     )
     assert [s for s in seen if s[0] == "day"] == [("day", 1, 3), ("day", 2, 3), ("day", 3, 3)]
+
+
+class FullGarmin(FakeGarmin):
+    """Answers every other get_* with a small payload, and FIT downloads with bytes."""
+
+    def __getattr__(self, name):
+        if name.startswith("get_"):
+            return lambda *a, **k: (self.calls.append((name, *a)), {"from": name})[1]
+        raise AttributeError(name)
+
+    def download_activity(self, activity_id, dl_fmt=None):
+        self.calls.append(("download_activity", activity_id))
+        return b"PK fit-zip"
+
+
+def test_full_detail_stores_everything():
+    from garmin_stats import paths
+
+    c = cfg(refresh_days=1, backfill_per_run=0, detail="full")
+    g = FullGarmin()
+    sync.run(c, garmin=g, today=TODAY)
+    kinds = {k for (k,) in rows(c, "SELECT kind FROM raw")}
+    for k in (
+        "heart_rate",
+        "stress",
+        "spo2",
+        "respiration",
+        "steps",
+        "hydration",
+        "menstrual",
+        "all_day_events",
+        "max_metrics",
+    ):
+        assert k in kinds, k
+    for k in (
+        "activity_detail:99",
+        "activity_splits:99",
+        "activity_weather:99",
+        "snapshot:race_predictions",
+        "snapshot:personal_records",
+        "snapshot:devices",
+    ):
+        assert k in kinds, k
+    fits = list((paths.home() / "activities").glob("*_99.zip"))
+    assert len(fits) == 1 and fits[0].read_bytes() == b"PK fit-zip"
+    # raw JSON is queryable with SQLite's json_extract
+    assert rows(c, "SELECT json_extract(payload, '$.from') FROM raw WHERE kind='heart_rate'") == [
+        ("get_heart_rates",)
+    ]
+
+
+def test_activity_detail_and_snapshots_fetched_once():
+    c = cfg(refresh_days=1, backfill_per_run=0, detail="full")
+    sync.run(c, garmin=FullGarmin(), today=TODAY)
+    g2 = FullGarmin()
+    sync.run(c, garmin=g2, today=TODAY)
+    called = {name for name, *_ in g2.calls}
+    assert "get_activity" not in called and "download_activity" not in called
+    assert "get_race_predictions" not in called
+
+
+def test_core_detail_is_lean():
+    c = cfg(refresh_days=1, backfill_per_run=0, detail="core")
+    g = FullGarmin()
+    sync.run(c, garmin=g, today=TODAY)
+    per_day = [n for n, *a in g.calls if a and a[0] == TODAY.isoformat()]
+    assert len(per_day) == sync.CORE_CALLS_PER_DAY
+    assert not any(n == "download_activity" for n, *_ in g.calls)
+
+
+def test_long_import_fetches_older_workouts_too():
+    c = cfg(detail="core")
+    g = FullGarmin()
+    sync.run(c, garmin=g, today=TODAY, days=60)
+    spans = [a for n, *a in g.calls if n == "get_activities_by_date"]
+    assert min(s for s, _ in spans) == "2026-03-22"  # 60 days back, not just 30

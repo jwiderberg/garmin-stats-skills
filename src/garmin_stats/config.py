@@ -32,8 +32,17 @@ sync_interval_minutes = 60
 request_delay_seconds = 1.0
 
 # Keep Garmin's full raw payloads (sleep epochs, HR samples, splits, ...).
-# ~50 KB per day. Turn off to keep only the summary tables.
+# Turn off to keep only the summary tables.
 store_raw = true
+
+# "full": everything Garmin keeps — all-day heart rate, stress, Body Battery,
+#   SpO2, respiration, steps, hydration, menstrual, workout detail + laps +
+#   weather, race predictions, records... (17 requests per day, ~30 s/day)
+# "core": sleep, HRV, daily totals, training status, readiness (5 per day, ~8 s)
+detail = "full"
+
+# Save each workout's original recording (.fit, zipped) in activities/.
+download_fit = true
 """
 
 
@@ -46,6 +55,8 @@ class Config:
     sync_interval_minutes: int = 60
     store_raw: bool = True
     request_delay_seconds: float = 1.0
+    detail: str = "full"
+    download_fit: bool = True
 
 
 def config_file() -> Path:
@@ -69,6 +80,8 @@ def load() -> Config:
         sync_interval_minutes=max(5, int(raw.get("sync_interval_minutes", 60))),
         store_raw=bool(raw.get("store_raw", True)),
         request_delay_seconds=max(0.5, float(raw.get("request_delay_seconds", 1.0))),
+        detail="core" if raw.get("detail") == "core" else "full",
+        download_fit=bool(raw.get("download_fit", True)),
     )
 
 

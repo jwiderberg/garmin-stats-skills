@@ -62,11 +62,18 @@ def do_login(terminal: bool, force: bool = True) -> bool:
 IMPORT_CHOICES = (30, 60, 90)
 
 
+def _minutes(days: int, cfg: config.Config) -> int:
+    per_request = cfg.request_delay_seconds * 1.25 + 0.35  # pacing + Garmin's response time
+    return max(1, round(days * sync.calls_per_day(cfg) * per_request / 60))
+
+
 def _ask_days(terminal: bool) -> int:
+    cfg = config.load()
+    est = ", ".join(f"{n} days ≈ {_minutes(n, cfg)} min" for n in IMPORT_CHOICES)
     prompt = (
         "How much of your Garmin history should I import now?\n\n"
-        "It downloads slowly on purpose (about 8 seconds per day) so Garmin "
-        "doesn't block you. 30 days ≈ 4 min, 60 ≈ 8 min, 90 ≈ 12 min.\n\n"
+        f"It downloads everything Garmin keeps, slowly on purpose so Garmin doesn't "
+        f"block you: {est}.\n\n"
         "You can close Terminal any time: the rest carries on in the background."
     )
     if mac.is_mac() and not terminal:

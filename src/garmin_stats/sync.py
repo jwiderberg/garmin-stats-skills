@@ -77,6 +77,28 @@ def _try(fn: Callable[[], Any]) -> Any:
         return None
 
 
+# detail = "full": everything else Garmin keeps per day, stored raw (kind → method).
+FULL_DAY = (
+    ("heart_rate", "get_heart_rates"),
+    ("stress", "get_stress_data"),  # includes the Body Battery series
+    ("body_battery_events", "get_body_battery_events"),
+    ("spo2", "get_spo2_data"),
+    ("respiration", "get_respiration_data"),
+    ("steps", "get_steps_data"),
+    ("floors", "get_floors"),
+    ("intensity_minutes", "get_intensity_minutes_data"),
+    ("hydration", "get_hydration_data"),
+    ("max_metrics", "get_max_metrics"),
+    ("menstrual", "get_menstrual_data_for_date"),
+    ("all_day_events", "get_all_day_events"),
+)
+CORE_CALLS_PER_DAY = 5
+
+
+def calls_per_day(cfg: Config) -> int:
+    return CORE_CALLS_PER_DAY + (len(FULL_DAY) if cfg.detail == "full" else 0)
+
+
 def plan(conn, cfg: Config, today: date) -> tuple[list[date], list[date]]:
     """(refresh_days, backfill_days) for this run."""
     refresh = [today - timedelta(days=i) for i in range(cfg.refresh_days)]
@@ -91,8 +113,11 @@ def plan(conn, cfg: Config, today: date) -> tuple[list[date], list[date]]:
     return refresh, backfill
 
 
-def day_row(g: Any, day: date, conn, store_raw: bool) -> dict[str, Any]:
+def day_row(g: Any, day: date, conn, store_raw: bool, full: bool = False) -> dict[str, Any]:
     iso = day.isoformat()
+    if full and store_raw:
+        for kind, method in FULL_DAY:
+            db.put_raw(conn, iso, kind, _try(lambda m=method: getattr(g, m)(iso)))
     stats = _try(lambda: g.get_stats(iso))
     sleep = _try(lambda: g.get_sleep_data(iso))
     hrv = _try(lambda: g.get_hrv_data(iso))
@@ -153,7 +178,63 @@ def day_row(g: Any, day: date, conn, store_raw: bool) -> dict[str, Any]:
     return row
 
 
-def spans(g: Any, conn, start: date, end: date, store_raw: bool) -> int:
+def activity_detail(g: Any, conn, activity_id: str, day: str, cfg: Config) -> None:
+    """Full record, laps, HR zones, weather, and the original FIT file."""
+    if conn.execute(
+        "SELECT 1 FROM raw WHERE kind = ?", (f"activity_detail:{activity_id}",)
+    ).fetchone():
+        return  # already have it; activities don't change
+    for kind, method in (
+        ("activity_detail", "get_activity"),
+        ("activity_splits", "get_activity_splits"),
+        ("activity_hr_zones", "get_activity_hr_in_timezones"),
+        ("activity_weather", "get_activity_weather"),
+    ):
+        db.put_raw(
+            conn, day, f"{kind}:{activity_id}", _try(lambda m=method: getattr(g, m)(activity_id))
+        )
+    if cfg.download_fit:
+        from garminconnect import Garmin
+
+        data = _try(
+            lambda: g.download_activity(activity_id, dl_fmt=Garmin.ActivityDownloadFormat.ORIGINAL)
+        )
+        if data:
+            folder = paths.home() / "activities"
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"{day}_{activity_id}.zip").write_bytes(data)
+    conn.commit()
+
+
+SNAPSHOTS = (
+    ("race_predictions", lambda g, t: g.get_race_predictions()),
+    ("personal_records", lambda g, t: g.get_personal_record()),
+    ("endurance_score", lambda g, t: g.get_endurance_score(_ago(t, 364), t)),
+    ("hill_score", lambda g, t: g.get_hill_score(_ago(t, 364), t)),
+    ("lactate_threshold", lambda g, t: g.get_lactate_threshold()),
+    ("fitness_age", lambda g, t: g.get_fitnessage_data(t)),
+    ("devices", lambda g, t: g.get_devices()),
+    ("heart_rate_zones", lambda g, t: g.get_heart_rate_zones_v2()),
+    ("user_profile", lambda g, t: g.get_user_profile()),
+)
+
+
+def _ago(iso: str, days: int) -> str:
+    return (date.fromisoformat(iso) - timedelta(days=days)).isoformat()
+
+
+def snapshots(g: Any, conn, today: date) -> None:
+    """Things Garmin keeps as 'current' rather than per day: once a day."""
+    t = today.isoformat()
+    for name, fetch in SNAPSHOTS:
+        kind = f"snapshot:{name}"
+        if conn.execute("SELECT 1 FROM raw WHERE date = ? AND kind = ?", (t, kind)).fetchone():
+            continue
+        db.put_raw(conn, t, kind, _try(lambda f=fetch: f(g, t)))
+    conn.commit()
+
+
+def spans(g: Any, conn, start: date, end: date, store_raw: bool, cfg: Config | None = None) -> int:
     """Activities, weigh-ins and BP for [start, end]. Returns activity count."""
     s, e = start.isoformat(), end.isoformat()
     acts = _try(lambda: g.get_activities_by_date(s, e)) or []
@@ -168,6 +249,8 @@ def spans(g: Any, conn, start: date, end: date, store_raw: bool) -> int:
         db.upsert(conn, "activities", row)
         if store_raw and row["date"]:
             db.put_raw(conn, row["date"], f"activity:{row['activity_id']}", a)
+            if cfg is not None and cfg.detail == "full":
+                activity_detail(g, conn, row["activity_id"], row["date"], cfg)
     for w in summarize.weigh_ins(_try(lambda: g.get_body_composition(s, e))):
         if w["date"] and w["weight_kg"] is not None:
             db.upsert(conn, "weigh_ins", w)
@@ -180,7 +263,7 @@ def spans(g: Any, conn, start: date, end: date, store_raw: bool) -> int:
 def _fetch_day(g: Any, d: date, conn, cfg: Config, patient: bool, progress: Progress) -> dict:
     for attempt in range(len(BACKOFF_S) + 1):
         try:
-            return day_row(g, d, conn, cfg.store_raw)
+            return day_row(g, d, conn, cfg.store_raw, full=cfg.detail == "full")
         except client.RateLimited:
             if not patient or attempt == len(BACKOFF_S):
                 raise
@@ -229,14 +312,22 @@ def run(
             progress("day", i=i, n=len(todo), date=d.isoformat(), row=row)
         progress("extras")
         recent_start = min(min(refresh), today - timedelta(days=30))
-        report["activities"] += spans(g, conn, recent_start, today, cfg.store_raw)
+        report["activities"] += spans(g, conn, recent_start, today, cfg.store_raw, cfg)
         if backfill:
-            report["activities"] += spans(g, conn, min(backfill), max(backfill), cfg.store_raw)
+            report["activities"] += spans(g, conn, min(backfill), max(backfill), cfg.store_raw, cfg)
+        if days and min(todo) < recent_start:  # a forced long import: older workouts too
+            older_end = recent_start - timedelta(days=1)
+            report["activities"] += spans(g, conn, min(todo), older_end, cfg.store_raw, cfg)
+        if cfg.detail == "full" and cfg.store_raw:
+            snapshots(g, conn, today)
         conn.commit()
         cutoff = (today - timedelta(days=cfg.history_days - 1)).isoformat()
         for table in ("daily", "activities", "weigh_ins", "raw"):
             conn.execute(f"DELETE FROM {table} WHERE date < ?", (cutoff,))
         conn.execute("DELETE FROM blood_pressure WHERE substr(measured_local,1,10) < ?", (cutoff,))
+        for f in (paths.home() / "activities").glob("*.zip"):
+            if f.name[:10] < cutoff:
+                f.unlink(missing_ok=True)
     except (client.NotLoggedIn, client.RateLimited) as e:
         report |= {"ok": False, "message": str(e)}
     except KeyboardInterrupt:

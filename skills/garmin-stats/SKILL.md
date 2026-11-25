@@ -56,6 +56,23 @@ Call `garmin_status`:
 
 `garmin_status.schema` is the authoritative column list.
 
+- **`raw`**: `(date, kind, payload)`, Garmin's original JSON for everything
+  else it keeps. Per day: `heart_rate` (all-day samples), `stress` (3-minute
+  stress plus the Body Battery series), `body_battery_events`, `spo2`,
+  `respiration`, `steps` (15-minute), `floors`, `intensity_minutes`,
+  `hydration`, `max_metrics`, `menstrual`, `all_day_events`, plus `sleep`,
+  `stats`, `hrv`, `training_status`, `readiness`. Per workout:
+  `activity_detail:<id>`, `activity_splits:<id>` (laps), `activity_hr_zones:<id>`,
+  `activity_weather:<id>`. Latest-state snapshots, stored once a day:
+  `snapshot:race_predictions`, `snapshot:personal_records`,
+  `snapshot:endurance_score`, `snapshot:hill_score`,
+  `snapshot:lactate_threshold`, `snapshot:fitness_age`, `snapshot:devices`,
+  `snapshot:heart_rate_zones`. Run `SELECT DISTINCT kind FROM raw` to see
+  what's there. Pull fields out with SQLite JSON functions rather than
+  fetching whole payloads.
+- Each workout's original recording is also saved as a zipped `.fit` file in
+  `~/.garmin-stats-skills/activities/`.
+
 ## Example queries
 
 ```sql
@@ -72,6 +89,13 @@ SELECT CASE WHEN date >= date('now','localtime','-6 days') THEN 'this week' ELSE
        round(avg(sleep_min)/60.0,1) AS sleep_h, round(avg(hrv_last_night_ms)) AS hrv,
        round(avg(resting_hr)) AS rhr, sum(steps) AS steps
 FROM daily WHERE date >= date('now','localtime','-13 days') GROUP BY wk;
+
+-- hydration (from raw JSON)
+SELECT date, json_extract(payload, '$.valueInML') AS ml
+FROM raw WHERE kind = 'hydration' ORDER BY date DESC LIMIT 14;
+
+-- latest race predictions
+SELECT payload FROM raw WHERE kind = 'snapshot:race_predictions' ORDER BY date DESC LIMIT 1;
 
 -- running by month
 SELECT strftime('%Y-%m', date) AS month, count(*) AS runs, round(sum(distance_km),1) AS km,

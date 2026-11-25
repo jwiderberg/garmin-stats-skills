@@ -1,11 +1,16 @@
 # Garmin Stats for Claude
 
-Ask Claude about your own Garmin data: sleep, HRV, resting heart rate, stress,
-Body Battery, steps, workouts, training load, VO2max, weight and blood pressure.
+Ask Claude about your own Garmin data, all of it: sleep, HRV, heart rate,
+stress, Body Battery, SpO2, respiration, steps, workouts (with laps, HR zones
+and the original FIT files), training status and load, Training Readiness,
+VO2max, race predictions, personal records, weight, blood pressure, hydration
+and cycle tracking.
 
 I wanted to ask *"am I recovered enough for a hard session?"* and get an answer
-grounded in my own numbers, not a generic one. Garmin has no personal API, so
-this does it the practical way: it copies your data to your Mac every hour and
+grounded in my own numbers, not a generic one. It's my data, so I want all of
+it. Garmin's official Personal API leaves out training status, Training
+Readiness, blood pressure and race predictions, so this takes the same route
+the Garmin Connect app does. It copies everything to your Mac every hour and
 lets Claude query that copy.
 
 Works in the Claude desktop app (Cowork) and Claude Code. macOS only.
@@ -28,8 +33,9 @@ Works in the Claude desktop app (Cowork) and Claude Code. macOS only.
 
 Then ask Claude *"How did I sleep last night?"*
 
-The import is deliberately slow, about 8 seconds per day (so 4 to 12 minutes),
-because hammering Garmin gets you blocked. You can close Terminal at any point;
+The import is deliberately slow, about half a minute per day (30 days takes
+roughly 15 minutes, 90 days about 40), because it fetches everything and
+hammering Garmin gets you blocked. You can close Terminal at any point;
 whatever's left carries on in the background. You don't need Python or
 developer tools: the installer explains each step and sets up everything itself.
 
@@ -73,6 +79,8 @@ Garmin can change that whenever it likes. Use it for your own account.
 | Setting | Default | |
 |---|---|---|
 | `history_days` | your choice at install (30/60/90) | how much history to keep; raise it and older days backfill gradually |
+| `detail` | `full` | `full` = everything Garmin keeps; `core` = sleep, HRV, daily totals, training (about 3× faster) |
+| `download_fit` | `true` | save each workout's original recording in `activities/` |
 | `request_delay_seconds` | `1.0` | minimum gap between Garmin requests (don't go lower) |
 | `sync_interval_minutes` | `60` | how often to sync (then run `garmin-stats schedule`) |
 | `store_raw` | `true` | keep Garmin's full detail: minute-level sleep, HR samples, splits |

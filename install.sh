@@ -61,7 +61,7 @@ Here's what will happen:
   1. Install a small helper program (in your user folder; no admin password)
   2. Sign in to Garmin, in a normal Mac window
   3. Choose how many days of history to import: 30, 60 or 90
-  4. Import them slowly, so Garmin doesn't block you (about 4–12 minutes)
+  4. Import everything Garmin keeps, slowly, so Garmin doesn't block you
   5. Create the plugin file you add to Claude
 
 Everything stays on this Mac. Your Garmin password is never saved.

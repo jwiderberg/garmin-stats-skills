@@ -93,9 +93,16 @@ def garmin_query(sql: str) -> dict[str, Any]:
 @mcp.tool()
 def garmin_raw(day: str, kind: str) -> Any:
     """Garmin's full original payload for one day, for detail the tables don't
-    hold. kind: "sleep" (minute-level stages, HR, SpO2, respiration epochs),
-    "stats", "hrv", "training_status", "readiness", or "activity:<activity_id>".
-    Large (sleep ~150 KB): fetch one at a time."""
+    hold. Day kinds: sleep, stats, hrv, training_status, readiness, heart_rate,
+    stress (incl. Body Battery series), body_battery_events, spo2, respiration,
+    steps, floors, intensity_minutes, hydration, max_metrics, menstrual,
+    all_day_events. Workout kinds: activity:<id>, activity_detail:<id>,
+    activity_splits:<id>, activity_hr_zones:<id>, activity_weather:<id>.
+    Daily snapshots: snapshot:race_predictions, snapshot:personal_records,
+    snapshot:endurance_score, snapshot:hill_score, snapshot:lactate_threshold,
+    snapshot:fitness_age, snapshot:devices, snapshot:heart_rate_zones.
+    `SELECT DISTINCT kind FROM raw` lists what's cached. Payloads can be large
+    (sleep ~150 KB): fetch one at a time, or use json_extract in garmin_query."""
     conn = _conn()
     try:
         row = conn.execute(
